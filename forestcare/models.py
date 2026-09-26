@@ -9,6 +9,8 @@ from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_val
 from .config import CORRECTION_TAXA
 
 LonLat = tuple[float, float]
+HeightClass = Literal["seedling", "shrub", "small_tree", "tree"]
+Phenology = Literal["vegetative", "flowering", "fruiting", "autumn_colour"]
 
 
 class Alternative(BaseModel):
@@ -34,8 +36,8 @@ class ObservationIn(BaseModel):
     target_probability: float = Field(ge=0, le=1, description="Probability of Prunus serotina")
     alternatives: list[Alternative] = Field(default_factory=list, max_length=10)
     plant_count_est: int = Field(default=1, ge=1, le=10_000)
-    height_class: Literal["seedling", "shrub", "small_tree", "tree"] | None = None
-    phenology: Literal["vegetative", "flowering", "fruiting", "autumn_colour"] | None = None
+    height_class: HeightClass | None = None
+    phenology: Phenology | None = None
     image: ImageIn | None = None
 
 
@@ -76,6 +78,11 @@ class ReviewIn(BaseModel):
     reviewer_role: str | None = Field(default=None, max_length=120)
     corrected_taxon: str | None = None
     note: str | None = Field(default=None, max_length=2000)
+    # Optional labels for confirmed observations. They replace the device's estimate
+    # (or fill it in, for field photos that have none).
+    plant_count: int | None = Field(default=None, ge=1, le=10_000)
+    height_class: HeightClass | None = None
+    phenology: Phenology | None = None
 
     @field_validator("corrected_taxon")
     @classmethod
@@ -88,6 +95,9 @@ class ReviewIn(BaseModel):
     def _consistent(self) -> "ReviewIn":
         if self.corrected_taxon and self.decision != "rejected":
             raise ValueError("corrected_taxon only applies to rejected observations")
+        labelled = self.plant_count is not None or self.height_class or self.phenology
+        if labelled and self.decision != "confirmed":
+            raise ValueError("plant_count, height_class and phenology describe confirmed Prunus serotina only")
         return self
 
 
@@ -103,3 +113,15 @@ class StandNoteIn(BaseModel):
             raise ValueError("management_action entries need the date the action was carried out")
         return self
 
+
+
+class PhotoImportMeta(BaseModel):
+    """Describes a folder of field photographs imported as one mission."""
+
+    mission_id: str | None = Field(default=None, min_length=1, max_length=80, pattern=r"^[A-Za-z0-9._:-]+$")
+    area_name: str | None = Field(default=None, max_length=200)
+    photographer: str = Field(min_length=2, max_length=120)
+    notes: str | None = Field(default=None, max_length=2000)
+    # Mark imports of test/synthetic pictures so they never pass as real field data.
+    simulated: bool = False
+    source_label: str | None = Field(default=None, max_length=200, description="e.g. the folder name")

@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REFERENCE_DIR = ROOT / "data" / "reference"
 RUNTIME_DIR = ROOT / "data" / "runtime"
+PHOTO_PREVIEW_MAX_PX = 1600
 WEB_DIR = ROOT / "web"
 
 TARGET_TAXON = "Prunus serotina"
@@ -58,6 +59,9 @@ class Thresholds:
     external_record_grid_uncertainty_m: float = 1000.0
     # Observation quality flags.
     poor_gnss_m: float = 10.0
+    # Used for stand linking when a device reports no position accuracy (common for
+    # phone/camera photos). The stored value stays NULL; this is only the working assumption.
+    assumed_accuracy_m: float = 10.0
     ambiguous_band: tuple[float, float] = (0.4, 0.75)
     # "Early invasion / few trees" context (LANUK wording, our numeric reading of it).
     small_stand_max_plants: int = 5

@@ -65,6 +65,8 @@ def priority(o: sqlite3.Row, facts: dict) -> tuple[int, list[str]]:
     if o["phenology"] == "fruiting":
         score += 1
         reasons.append("Fruiting reported (relevant to LANUK's 'fruiting specimens' criterion)")
+    if o["target_probability"] is None:
+        reasons.append("Field photo without model prediction: label it from the image")
     return score, reasons
 
 
@@ -80,6 +82,7 @@ def review_queue(conn: sqlite3.Connection, limit: int = 500) -> list[dict]:
             "phenology": o["phenology"], "plant_count_est": o["plant_count_est"],
             "image_url": f"/api/images/{o['image_path']}" if o["image_path"] else None,
             "qc_flags": json.loads(o["qc_flags_json"]), "source_kind": o["source_kind"],
+            "original_filename": o["original_filename"],
             "priority_score": score, "priority_reasons": reasons,
         })
     items.sort(key=lambda i: (-i["priority_score"], i["observed_at"]))
@@ -91,8 +94,8 @@ def observation_detail(conn: sqlite3.Connection, obs_id: int) -> dict:
     if o is None:
         raise NotFound(obs_id)
     reviews = [dict(r) for r in conn.execute("SELECT * FROM reviews WHERE observation_id = ? ORDER BY id", (obs_id,))]
-    mission = conn.execute("SELECT id, robot_id, area_name, started_at, notes, source_kind FROM missions WHERE id = ?",
-                           (o["mission_id"],)).fetchone()
+    mission = conn.execute("SELECT id, robot_id, area_name, started_at, notes, source_kind, protocol FROM missions"
+                           " WHERE id = ?", (o["mission_id"],)).fetchone()
     siblings = conn.execute(
         "SELECT o.id, o.observed_at, o.review_status, o.target_probability, o.image_path, o.phenology,"
         " (SELECT corrected_taxon FROM reviews WHERE observation_id = o.id ORDER BY id DESC LIMIT 1) AS corrected_taxon"
@@ -100,9 +103,11 @@ def observation_detail(conn: sqlite3.Connection, obs_id: int) -> dict:
         (o["stand_id"], obs_id),
     ).fetchall()
     d = dict(o)
-    for k in ("alternatives_json", "qc_flags_json", "context_json", "provenance_json"):
-        d[k.removesuffix("_json")] = json.loads(d.pop(k))
+    for k in ("alternatives_json", "qc_flags_json", "context_json", "provenance_json", "metadata_json"):
+        raw = d.pop(k)
+        d[k.removesuffix("_json")] = json.loads(raw) if raw else None
     d["image_url"] = f"/api/images/{o['image_path']}" if o["image_path"] else None
+    d["original_url"] = f"/api/observations/{obs_id}/original" if o["original_path"] else None
     d["reviews"] = reviews
     d["mission"] = dict(mission)
     d["stand_history"] = [
@@ -118,8 +123,9 @@ def add_review(conn: sqlite3.Connection, obs_id: int, review: ReviewIn, source_k
     at = at or now_iso()
     cur = conn.execute(
         "INSERT INTO reviews (observation_id, decision, corrected_taxon, note, reviewer, reviewer_role, reviewed_at,"
-        " source_kind) VALUES (?,?,?,?,?,?,?,?)",
-        (obs_id, review.decision, review.corrected_taxon, review.note, review.reviewer, review.reviewer_role, at, source_kind),
+        " source_kind, plant_count, height_class, phenology) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (obs_id, review.decision, review.corrected_taxon, review.note, review.reviewer, review.reviewer_role, at,
+         source_kind, review.plant_count, review.height_class, review.phenology),
     )
     conn.execute("UPDATE observations SET review_status = ? WHERE id = ?", (review.decision, obs_id))
     log_event(conn, review.reviewer, "review", str(obs_id), json.dumps({"decision": review.decision, "source_kind": source_kind}))

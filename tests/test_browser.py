@@ -96,3 +96,41 @@ def test_stand_view_and_provenance(page, server_url):
     expect(page.locator(".panel-body")).to_contain_text("What is real and what is simulated")
     expect(page.locator(".panel-body")).to_contain_text("Datenlizenz Deutschland")
     assert page.errors == []
+
+
+def test_import_photo_folder_and_label_in_the_ui(page, server_url, tmp_path):
+    from simulator.photos import SamplePhoto, jpeg_bytes
+    paths = []
+    for i, (lat, lon) in enumerate([(50.71250, 7.08976), (50.71250, 7.09040)]):  # Venusberg woodland, 45 m apart
+        path = tmp_path / f"IMG_UI{i + 1}.JPG"
+        path.write_bytes(jpeg_bytes(SamplePhoto(path.name, "Prunus serotina", lat, lon, synthetic_marker=False), seed=i))
+        paths.append(str(path))
+
+    page.goto(f"{server_url}/#missions")
+    page.locator("summary", has_text="Import field photos").click()
+    page.set_input_files("#photo-files", paths)
+    page.fill("#photo-by", "UI Photographer")
+    page.fill("#photo-area", "UI import test")
+    page.click("#photo-import")
+    expect(page.locator(".import-report")).to_contain_text("2 photo(s) imported")
+    expect(page.locator(".import-report")).to_contain_text("field photo")
+
+    page.locator(".import-report a", has_text="review them").click()
+    page.locator(".card.clickable", has_text="IMG_UI1.JPG").click()
+    expect(page.locator(".panel-body")).to_contain_text("Taken by a person")
+    expect(page.locator("#original-link")).to_be_visible()
+    obs_id = page.url.rsplit("/", 1)[-1]
+
+    page.fill("#reviewer", "UI Test Expert")
+    page.fill("#label-count", "4")
+    page.select_option("#label-phen", "fruiting")
+    page.locator("button[data-decision='confirmed']").click()
+    page.wait_for_function(f"location.hash !== '#obs/{obs_id}'")  # the next queue item opened
+
+    detail = page.request.get(f"{server_url}/api/observations/{obs_id}").json()
+    last = detail["reviews"][-1]
+    assert (last["decision"], last["plant_count"], last["phenology"], last["reviewer"]) == ("confirmed", 4, "fruiting", "UI Test Expert")
+    assert detail["source_kind"] == "field_photos"
+    original = page.request.get(f"{server_url}{detail['original_url']}")
+    assert original.body() == open(paths[0], "rb").read()
+    assert page.errors == []

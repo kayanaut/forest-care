@@ -28,6 +28,9 @@ STATUS_INFO = {
     "new": ("New", "First confirmed in the latest survey year."),
     "expanding": ("Expanding", "Confirmed plant count increased since the previous confirmed year."),
     "stable": ("Stable", "Confirmed plant count within the stable band."),
+    "confirmed_present": ("Present (not counted)",
+                          "Confirmed again in the latest year, but without a plant count to compare "
+                          "(e.g. field photos without a count label)."),
     "declining": ("Declining", "Confirmed plant count decreased since the previous confirmed year."),
     "not_redetected": ("Not re-detected", "Surveyed in the latest year, confirmed earlier, but not found again."),
     "awaiting_confirmation": ("Awaiting confirmation",
@@ -44,16 +47,35 @@ class Mission:
     year: int
     started_at: str
     track: list
-    detection_range_m: float
+    detection_range_m: float | None
     area_name: str | None
+    protocol: str = "transect"
 
     def covers(self, lat: float, lon: float, extra_m: float) -> bool:
+        """Only systematic surveys define coverage. Opportunistic photo walks never do: nobody
+        recorded what the photographer looked at and did not photograph."""
+        if self.protocol != "transect" or self.detection_range_m is None:
+            return False
         return any(distance_to_polyline_m(line, lat, lon) <= self.detection_range_m + extra_m for line in self.track)
 
 
 def load_missions(conn: sqlite3.Connection) -> list[Mission]:
-    return [Mission(r["id"], r["year"], r["started_at"], json.loads(r["track_json"]), r["detection_range_m"], r["area_name"])
+    return [Mission(r["id"], r["year"], r["started_at"], json.loads(r["track_json"]), r["detection_range_m"],
+                    r["area_name"], r["protocol"])
             for r in conn.execute("SELECT * FROM missions ORDER BY started_at")]
+
+
+def plant_count(o: sqlite3.Row) -> int:
+    """Plants a confirmed observation contributes to a count.
+
+    An expert's count label wins. Otherwise transect detections use the device's
+    estimate. Unlabelled field photos prove presence but do not count plants (0).
+    """
+    if o["label_plant_count"] is not None:
+        return o["label_plant_count"]
+    if o["protocol"] == "transect":
+        return o["plant_count_est"] or 1
+    return 0
 
 
 def _centroid(obs: list[sqlite3.Row]) -> tuple[float, float, float]:
@@ -71,14 +93,24 @@ def _year_rows(obs: list[sqlite3.Row], missions: list[Mission], years: list[int]
         # Count a mission as coverage only if its track came within camera range of the stand's
         # edge (spread capped at 10 m, so a wide GNSS scatter cannot fake coverage).
         covering = [m.id for m in missions if m.year == year and m.covers(lat, lon, min(radius, 10.0))]
-        mission_ids = sorted(set(covering) | {o["mission_id"] for o in yo})
+        # A detection also shows the place was visited, except a rejected opportunistic photo:
+        # a photo of some other shrub says nothing about whether P. serotina is still here.
+        evidence = {o["mission_id"] for o in yo if o["protocol"] == "transect" or o["review_status"] != "rejected"}
+        mission_ids = sorted(set(covering) | evidence)
         status = Counter(o["review_status"] for o in yo)
         # Plants seen in one mission are summed; across missions take the max to avoid double counting.
         per_mission = defaultdict(int)
         for o in yo:
             if o["review_status"] == "confirmed":
-                per_mission[o["mission_id"]] += o["plant_count_est"]
+                per_mission[o["mission_id"]] += plant_count(o)
         surveyed = bool(mission_ids)
+        counted = max(per_mission.values(), default=0)
+        if not surveyed:
+            plants = None
+        elif status["confirmed"] and not counted:
+            plants = None  # present, but only uncounted photos
+        else:
+            plants = counted
         rows.append({
             "year": year,
             "surveyed": surveyed,
@@ -88,8 +120,9 @@ def _year_rows(obs: list[sqlite3.Row], missions: list[Mission], years: list[int]
             "rejected": status["rejected"],
             "pending": status["pending"],
             "uncertain": status["uncertain"] + status["field_visit"],
-            "plants_confirmed": max(per_mission.values()) if per_mission else (0 if surveyed else None),
-            "phenology": sorted({o["phenology"] for o in yo if o["phenology"]}),
+            "plants_confirmed": plants,
+            "presence_only": bool(status["confirmed"]) and plants is None,
+            "phenology": sorted({o["phenology_eff"] for o in yo if o["phenology_eff"]}),
         })
     return rows
 
@@ -103,9 +136,11 @@ def _classify(rows: list[dict], t: Thresholds) -> tuple[str, dict | None, dict |
     if not latest["surveyed"]:
         return "not_surveyed", latest, confirmed_rows[-1]
     if latest["confirmed"]:
-        prev = next((r for r in reversed(rows[:-1]) if r["confirmed"]), None)
-        if prev is None:
+        if not any(r["confirmed"] for r in rows[:-1]):
             return "new", latest, None
+        prev = next((r for r in reversed(rows[:-1]) if r["confirmed"] and r["plants_confirmed"]), None)
+        if prev is None or not latest["plants_confirmed"]:
+            return "confirmed_present", latest, confirmed_rows[-2] if len(confirmed_rows) > 1 else None
         a, b = prev["plants_confirmed"], latest["plants_confirmed"]
         if b >= a * t.expand_ratio and b - a >= t.expand_min_plants:
             return "expanding", latest, prev
@@ -154,16 +189,17 @@ def summarize_stand(stand_id: str, obs: list[sqlite3.Row], notes: list[sqlite3.R
         reasons.append({"code": "mixed_reviews", "text":
                         f"Confirmed and rejected detections in {reviewed_years[-1]['year']}: "
                         "possibly mixed with a look-alike species."})
-    median_gnss = statistics.median(o["gnss_accuracy_m"] for o in obs)
+    known = [o["gnss_accuracy_m"] for o in obs if o["gnss_accuracy_m"] is not None]
+    median_gnss = statistics.median(known) if known else 0.0
     if median_gnss > t.poor_gnss_m:
         reasons.append({"code": "poor_location", "text": f"Median GNSS accuracy {median_gnss:.0f} m: location is imprecise."})
 
-    latest_plants = next((r["plants_confirmed"] for r in reversed(rows) if r["confirmed"]), None)
-    fruiting_small = any(o["phenology"] == "fruiting" for o in confirmed) and (latest_plants or 0) <= 2
+    latest_plants = next((r["plants_confirmed"] for r in reversed(rows) if r["confirmed"] and r["plants_confirmed"]), None)
+    fruiting_small = any(o["phenology_eff"] == "fruiting" for o in confirmed) and latest_plants is not None and latest_plants <= 2
     lanuk_criteria = [
         {"code": "near_protected", "applies": bool(protected), "evidence": ", ".join(protected) or "none within buffer"},
-        {"code": "early_invasion", "applies": latest_plants is not None and latest_plants <= t.small_stand_max_plants,
-         "evidence": f"{latest_plants} confirmed plants" if latest_plants is not None else "no confirmed plants"},
+        {"code": "early_invasion", "applies": None if latest_plants is None else latest_plants <= t.small_stand_max_plants,
+         "evidence": f"{latest_plants} confirmed plants" if latest_plants is not None else "no counted plants"},
         {"code": "low_infestation", "applies": None, "evidence": "not assessable from robot detections alone"},
         {"code": "fruiting_solitary", "applies": fruiting_small,
          "evidence": "fruiting observed on a stand of ≤2 plants" if fruiting_small else "not observed"},
@@ -247,9 +283,13 @@ def stand_notes(conn: sqlite3.Connection, stand_id: str) -> list[dict]:
     return [dict(r) for r in conn.execute("SELECT * FROM stand_notes WHERE stand_id = ? ORDER BY recorded_at", (stand_id,))]
 
 
-# Latest review per observation supplies the corrected taxon for rejected detections.
+# The latest review supplies the corrected taxon and any expert labels; the mission its protocol.
 _OBS_WITH_CORRECTION = """
-SELECT o.*, (SELECT r.corrected_taxon FROM reviews r WHERE r.observation_id = o.id
-             ORDER BY r.id DESC LIMIT 1) AS corrected_taxon
+SELECT o.*, r.corrected_taxon, r.plant_count AS label_plant_count,
+       COALESCE(r.phenology, o.phenology) AS phenology_eff,
+       COALESCE(r.height_class, o.height_class) AS height_eff,
+       m.protocol AS protocol
 FROM observations o
+JOIN missions m ON m.id = o.mission_id
+LEFT JOIN reviews r ON r.id = (SELECT MAX(id) FROM reviews WHERE observation_id = o.id)
 """

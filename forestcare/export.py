@@ -66,26 +66,32 @@ def lanuk_draft_csv(conn: sqlite3.Connection, stands: list[dict]) -> str:
     w.writeheader()
     for s in verified(stands):
         rows = conn.execute(
-            "SELECT o.observed_at, o.height_class, o.phenology, o.gnss_accuracy_m, r.reviewer, r.source_kind AS review_kind"
+            "SELECT o.observed_at, o.gnss_accuracy_m, o.original_path, r.reviewer, r.source_kind AS review_kind,"
+            " COALESCE(r.height_class, o.height_class) AS height_class, COALESCE(r.phenology, o.phenology) AS phenology"
             " FROM observations o JOIN reviews r ON r.id = (SELECT MAX(id) FROM reviews WHERE observation_id = o.id)"
             " WHERE o.stand_id = ? AND o.review_status = 'confirmed'", (s["id"],)).fetchall()
         note = conn.execute("SELECT action_date, text FROM stand_notes WHERE stand_id = ? AND kind = 'management_action'"
                             " ORDER BY action_date DESC LIMIT 1", (s["id"],)).fetchone()
         x, y = wgs84_to_utm32(s["lat"], s["lon"])
         reviewers = sorted({r["reviewer"] for r in rows})
-        gnss = max(r["gnss_accuracy_m"] for r in rows)
+        known = [r["gnss_accuracy_m"] for r in rows if r["gnss_accuracy_m"] is not None]
+        accuracy = f"Lagegenauigkeit ca. {max(known):.0f} m" if known else "Lagegenauigkeit nicht angegeben"
+        photos = sum(1 for r in rows if r["original_path"])
+        method = "Roboter-Monitoring mit Bildklassifikation" if photos < len(rows) else "Feldfotos"
+        if 0 < photos < len(rows):
+            method += f" und {photos} Feldfoto(s)"
         simulated = "simulated" in s["source_kinds"] or any(r["review_kind"] == "simulated" for r in rows)
         w.writerow({
             "art": TARGET_LABEL_DE,
             "artgruppe": "Gehölze",
             "funddatum": s["last_confirmed"],
-            "anz_abs": s["latest_plants_confirmed"],
-            "individuen": individuen_class(s["latest_plants_confirmed"] or 1),
+            "anz_abs": s["latest_plants_confirmed"] if s["latest_plants_confirmed"] is not None else "",
+            "individuen": individuen_class(s["latest_plants_confirmed"]) if s["latest_plants_confirmed"] else "keine Angabe",
             "bed_fl": bed_fl_class(extent_m2(s["radius_m"])),
             "stadium": "", "repro": "", "lebensraum": "",
             "fundort": f"Bonn-{s['stadtbezirk']}, {s['district']}; {s['landuse'] or 'nicht als Gehölzfläche kartiert'}",
-            "bemerkung": (f"Roboter-Monitoring mit Bildklassifikation; {len(rows)} Beobachtung(en) fachlich bestätigt. "
-                          f"Lagegenauigkeit ca. {gnss:.0f} m; Fläche grob aus Positionen geschätzt. Bestand {s['id']}."),
+            "bemerkung": (f"{method}; {len(rows)} Beobachtung(en) fachlich bestätigt. "
+                          f"{accuracy}; Fläche grob aus Positionen geschätzt. Bestand {s['id']}."),
             "beseitigt": "keine Angabe",
             "x_utm32": f"{x:.1f}", "y_utm32": f"{y:.1f}",
             "lat": s["lat"], "lon": s["lon"],

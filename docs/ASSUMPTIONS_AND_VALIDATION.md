@@ -4,7 +4,7 @@ Status as of 2026-09-26.
 
 ## What works (and is tested)
 
-62 automated tests (`uv run pytest`) pass, including two that drive the real web UI in
+85 automated tests (`uv run pytest`) pass, including three that drive the real web UI in
 headless Chromium.
 
 | Capability | Evidence |
@@ -24,6 +24,16 @@ headless Chromium.
 | Whole demo scenario produces the intended statuses | `test_demo_scenario_statuses` (9 stands) |
 | Everything simulated is labelled simulated | `test_everything_in_the_demo_is_marked_simulated` |
 | UI: review a detection (incl. keyboard shortcut), open a stand, see provenance | `tests/test_browser.py` |
+| Field photos: EXIF position, accuracy, heading, altitude and capture time, each with its source; missing time zone or accuracy flagged; GPS time used when no offset | `test_read_photo_with_full_exif`, `test_missing_offset_and_accuracy_are_flagged_not_invented`, `test_gps_timestamp_is_preferred_over_an_unzoned_local_time` |
+| Folder import report: accepted, duplicate, rejected (no GPS, outside Bonn), skipped (non-image, HEIC) | `test_import_folder_report_and_preservation` |
+| Originals kept byte-for-byte; SHA-256 recorded; manifest written; previews without GPS metadata | same test, plus `test_upload_endpoint_and_original_download` |
+| Tampered originals detected; download refused with 409; `verify-originals` reports them | `test_upload_endpoint_and_original_download` |
+| Re-importing a folder adds nothing; a file changed between the two passes is not stored | `test_reimport_is_idempotent`, `test_file_changed_between_passes_is_not_stored`, `test_adding_photos_to_an_existing_photo_mission` |
+| Synthetic test photos are always stored as simulated | `test_synthetic_marker_forces_simulated` |
+| Expert labels (count, height, phenology) only with "confirmed"; they override robot estimates and feed trends | `test_labels_only_for_confirmed`, `test_counted_photo_label_feeds_the_trend`, `test_expert_label_overrides_robot_estimate` |
+| Photos are presence-only: never coverage, a rejected photo is no evidence of absence, uncounted presence is not a trend | `test_photo_walk_never_counts_as_coverage`, `test_rejected_photo_is_not_evidence_of_absence`, `test_uncounted_photo_confirms_presence_but_not_a_trend` |
+| Schema migration from the robot-only database keeps all rows | `test_migration_from_v1_keeps_data` |
+| UI: import photos through the browser form, label one, download the identical original | `test_import_photo_folder_and_label_in_the_ui` |
 
 Also checked by hand with screenshots: light and dark themes, and a 390 px phone width
 without horizontal scrolling.
@@ -39,12 +49,14 @@ without horizontal scrolling.
 | Plant positions and stand dynamics | **Invented**, placed in real Bonn woodland. **They say nothing about real occurrences.** | ground truth in `data/runtime/sim_ground_truth.json` |
 | Review history for 2024 to June 2026 | **Simulated reviewer** ("Demo reviewer (simulated)") | `source_kind = simulated` on each review |
 | Stand log entries (one management action, one monitoring decision) | **Simulated** | named "Demo forester/ecologist (simulated)" |
+| Demo photo walk (6 imported photos, plus 1 duplicate, 2 rejected and 1 non-image file) | **Synthetic drawings** with real EXIF structure | "SYNTHETIC TEST PHOTO" in pixels and EXIF, so the importer stores them as `simulated` |
+| Photo import itself (EXIF reading, storage, hashing, review) | **Real code path**; tested with generated JPEGs, not yet with a real phone or camera folder | — |
 | Bonn districts, land use, NSG, FFH, biotopes, GBIF records, LANUK Neobiota counts | **Real**, snapshots of 2026-09-26 | green "real" badge; manifest with licence and hash |
 | Species facts and ID hints | **Real**, summarised from LANUK pages with a citation per statement | sources listed in the UI |
 | Orthophotos and forest layers | **Real**, live WMS | "live" badge in the layer switcher |
 
-The September 2026 survey round (34 detections) is left unreviewed on purpose, so a person
-can try the workflow. Confirming the pending seedlings in NSG Ennert turns stand EN-1
+The September 2026 round (34 robot detections and 6 field photos) is left unreviewed on
+purpose, so a person can try the workflow. Confirming the pending seedlings in NSG Ennert turns stand EN-1
 into a new stand in a protected area.
 
 ## Assumptions that need validation with local experts
@@ -107,15 +119,37 @@ choices, not validated values.
     Düne Tannenbusch needs permission from the responsible authorities and landowners
     (state forest, city forest, private). The prototype does not model access rules.
 
+### Field photos
+
+14. **Real camera files.** The importer has been tested with generated JPEGs only. Before
+    relying on it, import a real folder from each device in use (iPhone, Android, GPS
+    camera, robot camera). Check the following:
+    - Is `GPSHPositioningError` present?
+    - Is `OffsetTimeOriginal` present?
+    - Does rotation and orientation come out right?
+    - What does the device do when there is no GPS fix: no position, or a stale one?
+15. **Accuracy when missing.** 10 m is assumed for stand grouping when a photo carries no
+    accuracy. Is that realistic for phones under the Bonn forest canopy, or is a larger
+    value safer?
+16. **Time zone.** Local time without an offset is read as Europe/Berlin. That is right
+    for cameras set to Bonn time, wrong for travel cameras left on another zone.
+17. **What an expert labels on a photo.** Is a plant count from a single photo meaningful,
+    or should photos only confirm presence plus a cover class? Which labels do
+    practitioners want (height class, phenology, reproduction, "stump sprouts")?
+18. **Personal data in EXIF.** Originals keep all metadata, including camera serial
+    numbers or owner names if the device writes them, and the photographer's route.
+    Retention and access rules are needed before real use. Previews shown in the UI carry
+    no metadata.
+
 ### Reporting and governance
 
-14. **Reporting to LANUK.** Would LANUK accept robot-assisted, expert-verified records in
+19. **Reporting to LANUK.** Would LANUK accept robot-assisted, expert-verified records in
     the Neobiota portal? In what form, and with what validation? The export is only a
     draft, and nothing is submitted automatically.
-15. **Data protection.** Robot cameras in urban parks can capture people. Real
+20. **Data protection.** Robot cameras in urban parks can capture people. Real
     deployments need a data-protection assessment (blurring, retention, legal basis).
     The simulation has no such content.
-16. **Licences.** Confirm the licence of LANUK's public Neobiota feature service and the
+21. **Licences.** Confirm the licence of LANUK's public Neobiota feature service and the
     protected-biotope layer before any publication of derived data.
 
 ## Known limitations
@@ -129,6 +163,11 @@ choices, not validated values.
   they are lower bounds.
 - **Network needs.** The OpenStreetMap basemap and the WMS layers need internet. All
   analysis and the reference layers work offline.
+- **Photos that cannot be imported.** Photos without GPS cannot be placed by hand yet,
+  and HEIC (the iPhone default) must be exported as JPEG first. Browser uploads are
+  limited to 500 files. Use the CLI for larger folders.
+- **Photo counts.** One photo usually shows one part of a stand. Photo counts are only
+  used for trends when an expert enters them, and they are still lower bounds.
 - **Simulated images** carry the same cues in every frame. Real photos will be much
   harder to judge, and the review UI may need zoom, several frames per detection, and
   side-by-side comparison with earlier years.

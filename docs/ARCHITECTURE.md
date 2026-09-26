@@ -2,8 +2,9 @@
 
 Forest Care Bonn is a prototype for monitoring one invasive plant, *Prunus serotina*
 (Spätblühende Traubenkirsche), in Bonn's forests and wooded urban green. A ground robot
-drives survey transects and reports candidate detections. The system places each detection
-in real Bonn and NRW context, and a person confirms or rejects it. Repeated surveys then show
+drives survey transects and reports candidate detections, and people can add folders of
+geotagged field photos. The system places each detection or photo in real Bonn and NRW
+context, and a person confirms or rejects it. Repeated surveys then show
 where stands appear, grow, stay stable, shrink or need another look.
 
 The system describes and flags. It never proposes an intervention; decisions about
@@ -61,13 +62,14 @@ flowchart LR
 | Module | Responsibility |
 |---|---|
 | `forestcare/models.py` | Pydantic schemas: the robot contract (`MissionIn`), reviews, stand notes |
-| `forestcare/ingest.py` | Validation, Bonn boundary filter, quality flags, image storage, stand linking |
+| `forestcare/ingest.py` | Validation, Bonn boundary filter, quality flags, image storage, stand linking (shared by both import paths) |
+| `forestcare/photos.py` | Field-photo import: EXIF reading, original preservation, previews, manifest, integrity check |
 | `forestcare/reference.py` | Loads the snapshots and answers "what is at this point?" |
 | `forestcare/stands.py` | Per-year stand history, status classification, inspection reasons |
 | `forestcare/review.py` | Queue ordering with reasons; append-only review decisions |
 | `forestcare/export.py` | Stands GeoJSON and a draft in LANUK Neobiota field format |
 | `forestcare/api.py` | HTTP API and static UI (`/docs` has the OpenAPI description) |
-| `simulator/` | Ground-truth world, robot missions, image drawings, simulated reviewer |
+| `simulator/` | Ground-truth world, robot missions, image drawings, synthetic geotagged test photos, simulated reviewer |
 | `web/` | Map, review queue, stand history, missions, data & provenance |
 
 ## Workflow
@@ -120,9 +122,14 @@ this, so a wide GNSS scatter cannot fake coverage. Coverage is what lets the sys
 "not re-detected" (the robot was there) rather than "not surveyed" (no evidence either way).
 
 **Counting.** Plants confirmed in a year = the maximum over that year's missions of the
-summed plant estimates from confirmed detections. Taking the maximum avoids counting the
-same plants twice across the June and September runs. Because detection is imperfect,
-the number is a lower bound.
+summed plant counts from confirmed observations. Taking the maximum avoids counting the
+same plants twice across the June and September runs. Each observation's count is:
+
+- the expert's count label, if the reviewer gave one;
+- otherwise the robot's estimate;
+- zero for an unlabelled field photo, which proves presence but counts nothing.
+
+Because detection is imperfect, the number is a lower bound.
 
 **Status** (latest survey year vs. the previous year with confirmed plants):
 
@@ -132,6 +139,7 @@ the number is a lower bound.
 | Expanding | plants ≥ 1.5 × previous **and** at least +3 |
 | Stable | neither expanding nor declining |
 | Declining | plants ≤ 0.67 × previous **and** at least −3 |
+| Present (not counted) | confirmed again this year, but only by photos without a count label, so no trend can be computed |
 | Not re-detected | surveyed this year, nothing found, confirmed earlier |
 | Awaiting confirmation | confirmed earlier, this year's detections pending or uncertain |
 | Not surveyed recently | confirmed earlier, no mission covered it this year |
@@ -160,17 +168,71 @@ yes, no, or unknown, with the evidence. It is labelled as not a recommendation.
 
 | Table | Content | Notes |
 |---|---|---|
-| `missions` | robot, area, times, driven track, detection range, provenance | `source_kind` = `simulated` \| `robot` |
-| `observations` | position + accuracy, prediction, image, QC flags, captured context, stand | `uid` unique (idempotency) |
-| `reviews` | decision, corrected taxon, note, reviewer, role, time | append-only; `source_kind` = `human` \| `simulated` |
+| `missions` | robot or camera, area, times, protocol, track, detection range, provenance | `protocol` = `transect` \| `opportunistic`; `source_kind` = `simulated` \| `robot` \| `field_photos` |
+| `observations` | position + accuracy, prediction, image/preview, original file (path, SHA-256, name, size), full metadata, QC flags, captured context, stand | `uid` unique (idempotency); model fields, accuracy and count may be NULL |
+| `reviews` | decision, corrected taxon, note, reviewer, role, time, optional labels (plant count, height class, phenology) | append-only; `source_kind` = `human` \| `simulated`; labels only with "confirmed" |
 | `stands` | id | status is computed, not stored |
 | `stand_notes` | notes, monitoring decisions, management actions | human-entered only |
 | `events` | audit log of ingests, reviews, notes | append-only |
+
+The schema version is kept in `PRAGMA user_version`. Version 1 was the robot-only
+prototype. Version 2 adds the photo columns and relaxes constraints. `init_db` migrates
+a version-1 database in place, keeping every row: it rebuilds the tables inside one
+transaction and then runs `PRAGMA foreign_key_check`. A test covers this migration.
+
+## Field photos
+
+A folder of geotagged photographs is imported as one mission with
+`protocol = opportunistic` (`forestcare/photos.py`; CLI `import-photos`, browser upload,
+or `POST /api/photo-missions`).
+
+```mermaid
+flowchart LR
+  F[Folder of photos] --> P1["Pass 1: read + hash each file<br/>EXIF → position, time, accuracy"]
+  P1 -->|no GPS / outside Bonn / not an image| R[Report: rejected or skipped, with reason]
+  P1 -->|same SHA-256 already stored| D[Report: duplicate]
+  P1 --> M[Mission: opportunistic,<br/>photographer, cameras]
+  M --> P2["Pass 2: re-read, re-hash<br/>store original byte-for-byte + verify<br/>preview JPEG · MANIFEST.json"]
+  P2 --> O[Observation: no model output,<br/>full EXIF + derived values + sources]
+  O --> Q[Review queue → expert labels]
+```
+
+- **Two passes.** Folders can be large, so the import keeps at most one photo in memory.
+  The second read must hash to the same value as the first, otherwise the file is
+  reported as "changed during import" and not stored.
+- **Derived values name their source.**
+  - Position: EXIF `GPSLatitude`/`GPSLongitude`.
+  - Accuracy: `GPSHPositioningError`. If missing, it stays NULL, is flagged
+    `accuracy_unknown`, and 10 m is assumed only for stand grouping.
+  - Time: `DateTimeOriginal` + `OffsetTimeOriginal`, otherwise the GPS time stamp (UTC),
+    otherwise `DateTimeOriginal` read as Europe/Berlin (flagged `timezone_assumed`).
+- **Preservation.**
+  - The original is written as `<sha256-prefix>_<name>` and read back to verify the
+    hash.
+  - The SHA-256 is stored, and `GET /api/observations/{id}/original` re-hashes before
+    serving; on a mismatch it returns 409.
+  - `verify-originals` and `GET /api/originals/verify` check every stored original.
+  - The complete EXIF is kept in `metadata_json`. MakerNote blobs are summarised there,
+    but they remain in the original file.
+  - The preview has EXIF orientation applied, is downscaled to 1600 px, and carries no
+    metadata.
+- **Identity.** The observation uid is `PHOTO-<first 16 hex of SHA-256>`, so re-importing
+  the same file is a no-op, even from a differently named folder.
+- **Presence-only semantics.** Opportunistic missions never provide coverage. A rejected
+  photo does not count as a visit either: a photo of another shrub says nothing about
+  the stand. So photos cannot create "not re-detected". An unlabelled confirmed photo
+  proves presence without a count, which gives the status "Present (not counted)".
+- **Test data safety.** Synthetic photos from `simulator/photos.py` carry "SYNTHETIC TEST
+  PHOTO" in `ImageDescription`, and the importer then stores the mission as `simulated`.
+  `--simulated` / the "test pictures" checkbox does the same for any folder.
 
 ## Provenance
 
 Every record says where it came from:
 
+- **Photo missions** carry the photographer, the camera models, the importer version,
+  and the source folder name. Each photo carries its original file name, size, SHA-256,
+  and the EXIF source of every derived value.
 - **Missions and observations** carry `source_kind` and the robot id. They also carry the
   model name and version, the simulator name, version and seed (if simulated), the
   SHA-256 of the mission payload and of the image, and the ingest time.
@@ -231,8 +293,8 @@ The next steps once the workflow is validated, roughly in order:
    beyond a typed name.
 2. **Expert tools for stands:** merge, split and move stands, plus a field-visit
    checklist export.
-3. **Real imagery:** JPEG capture, EXIF/GNSS cross-checks, and several frames per
-   detection.
+3. **Real imagery:** robot JPEG capture with EXIF/GNSS cross-checks, several frames per
+   detection, HEIC support for iPhone photos, and manual placement of photos without GPS.
 4. **Model feedback loop:** export reviewed images as a labelled dataset, then retrain.
    The Missions tab already shows review outcomes by model probability.
 5. **Scale** only if needed: PostGIS for geometry, object storage for images, and a

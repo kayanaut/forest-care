@@ -7,24 +7,32 @@ Docs: http://127.0.0.1:8000/docs (OpenAPI, including the robot ingest contract)
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import sqlite3
+import urllib.parse
 from collections import Counter
 from pathlib import Path
 from typing import Iterator
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
 from . import export, review, stands
 from .config import (CORRECTION_TAXA, NOTE_KINDS, REVIEW_DECISIONS, TARGET_TAXON, WEB_DIR, WMS_LAYERS, Settings)
 from .db import connect, init_db
 from .ingest import ingest_mission
-from .models import MissionIn, ReviewIn, StandNoteIn
+from .models import MissionIn, PhotoImportMeta, ReviewIn, StandNoteIn
+from .photos import PhotoError, PhotoSource, import_photos, verify_originals
 from .reference import ReferenceData
 
-_MEDIA = {".svg": "image/svg+xml", ".jpg": "image/jpeg", ".png": "image/png"}
+_MEDIA = {".svg": "image/svg+xml", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+          ".tif": "image/tiff", ".tiff": "image/tiff"}
+_SAFE_IMAGE_HEADERS = {"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+                       "X-Content-Type-Options": "nosniff"}
+MAX_UPLOAD_FILES = 500
 _CONFIDENCE_BANDS = [(0.0, 0.5), (0.5, 0.7), (0.7, 0.85), (0.85, 1.01)]
 
 
@@ -51,6 +59,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def post_mission(mission: MissionIn, conn: sqlite3.Connection = Depends(db)) -> dict:
         """Ingest one survey mission with its candidate detections. Re-sending is safe (idempotent by uid)."""
         return ingest_mission(conn, ref, settings.image_dir, t, mission, actor=f"robot:{mission.robot_id}")
+
+    @app.post("/api/photo-missions", tags=["photos"])
+    def post_photo_mission(
+        files: list[UploadFile] = File(..., description="Photos of one field visit (a folder upload)"),
+        photographer: str = Form(...), area_name: str | None = Form(None), mission_id: str | None = Form(None),
+        notes: str | None = Form(None), source_label: str | None = Form(None), simulated: bool = Form(False),
+        conn: sqlite3.Connection = Depends(db),
+    ) -> dict:
+        """Import geotagged field photographs as one opportunistic mission. Originals are kept byte-for-byte."""
+        try:
+            meta = PhotoImportMeta(photographer=photographer, area_name=area_name or None, mission_id=mission_id or None,
+                                   notes=notes or None, source_label=source_label or None, simulated=simulated)
+        except ValidationError as exc:
+            raise HTTPException(422, json.loads(exc.json(include_url=False, include_context=False)))
+        if len(files) > MAX_UPLOAD_FILES:
+            raise HTTPException(413, f"at most {MAX_UPLOAD_FILES} files per import; use the command line for larger folders")
+
+        def reader(upload: UploadFile):
+            def read() -> bytes:
+                upload.file.seek(0)
+                return upload.file.read()
+            return read
+
+        sources = [PhotoSource(f.filename or "unnamed", reader(f)) for f in files]
+        try:
+            return import_photos(conn, ref, settings.image_dir, t, sources, meta, actor=f"upload:{meta.photographer}")
+        except PhotoError as exc:
+            raise HTTPException(409, str(exc))
+
+    @app.get("/api/observations/{obs_id}/original", tags=["photos"])
+    def get_original(obs_id: int, conn: sqlite3.Connection = Depends(db)) -> Response:
+        """The untouched original file, served only if its SHA-256 still matches the import record."""
+        r = conn.execute("SELECT original_path, original_sha256, original_filename FROM observations WHERE id = ?",
+                         (obs_id,)).fetchone()
+        if r is None or not r["original_path"]:
+            raise HTTPException(404, "no original file for this observation")
+        base = settings.image_dir.resolve()
+        path = (base / r["original_path"]).resolve()
+        if not path.is_relative_to(base) or not path.is_file():
+            raise HTTPException(404, "original file is missing")
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != r["original_sha256"]:
+            raise HTTPException(409, "integrity check failed: the stored original no longer matches its import hash")
+        name = r["original_filename"].rsplit("/", 1)[-1]
+        ascii_name = name.encode("ascii", "replace").decode().replace("?", "_").replace('"', "_")
+        return Response(data, media_type=_MEDIA.get(path.suffix.lower(), "application/octet-stream"), headers={
+            **_SAFE_IMAGE_HEADERS, "X-Content-SHA256": r["original_sha256"],
+            "Content-Disposition": f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{urllib.parse.quote(name)}',
+        })
+
+    @app.get("/api/originals/verify", tags=["photos"])
+    def get_verify_originals(conn: sqlite3.Connection = Depends(db)) -> dict:
+        """Re-hash every stored original photo and report missing or changed files."""
+        return verify_originals(conn, settings.image_dir)
 
     @app.get("/api/missions", tags=["robot"])
     def get_missions(conn: sqlite3.Connection = Depends(db)) -> list[dict]:
@@ -193,6 +255,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             c = Counter(r[0] for r in conn.execute(
                 "SELECT review_status FROM observations WHERE target_probability >= ? AND target_probability < ?", (lo, hi)))
             calibration.append({"band": f"{lo:.2f}–{min(hi, 1):.2f}", **{k: c[k] for k in REVIEW_DECISIONS}, "pending": c["pending"]})
+        c = Counter(r[0] for r in conn.execute("SELECT review_status FROM observations WHERE target_probability IS NULL"))
+        if c:
+            calibration.append({"band": "no model (field photos)", **{k: c[k] for k in REVIEW_DECISIONS}, "pending": c["pending"]})
         return {
             "stands_by_status": dict(Counter(s["status"] for s in all_s)),
             "needs_inspection": sum(s["needs_inspection"] for s in all_s),
@@ -211,12 +276,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def get_image(path: str) -> FileResponse:
         base = settings.image_dir.resolve()
         target = (base / path).resolve()
-        if not target.is_relative_to(base) or not target.is_file() or target.suffix not in _MEDIA:
+        if not target.is_relative_to(base) or not target.is_file() or target.suffix.lower() not in _MEDIA:
             raise HTTPException(404, "image not found")
-        # Images come from robots; never let an SVG run script if opened directly.
-        return FileResponse(target, media_type=_MEDIA[target.suffix],
-                            headers={"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
-                                     "X-Content-Type-Options": "nosniff"})
+        # Images come from robots and uploads; never let an SVG run script if opened directly.
+        return FileResponse(target, media_type=_MEDIA[target.suffix.lower()], headers=_SAFE_IMAGE_HEADERS)
 
     # -- web UI ----------------------------------------------------------------------------
 
