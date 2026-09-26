@@ -1,0 +1,54 @@
+{
+  "taxon": "Prunus serotina",
+  "authority": "Ehrh.",
+  "name_de": "Spätblühende Traubenkirsche",
+  "name_en": "Black cherry",
+  "gbif_taxon_key": 3021850,
+  "document_kind": "Hand-written summary of the cited LANUK pages (not a copy). Wording is ours; check the originals before relying on it.",
+  "summarised_on": "2026-09-26",
+  "status_nrw": [
+    {"text": "Fully naturalised in NRW ('als Agriophyt ... überall eingebürgert'); strong spread since the 1970s.", "source": "lanuk_neobiota_kurz"},
+    {"text": "Classified by LANUK as invasive: high reproductive potential (early seed production, stump sprouting, root suckers) and high dispersal potential.", "source": "lanuk_neobiota_kurz"},
+    {"text": "NRW biodiversity monitoring reports a rising trend since 2006.", "source": "lanuk_monitoring"},
+    {"text": "Not on the EU list of invasive alien species of Union concern (LANUK find points carry 'nicht Unionsliste'). There is therefore no EU-regulation reporting duty; reporting to LANUK is voluntary.", "source": "lanuk_fundpunkte"}
+  ],
+  "identification": [
+    {"text": "Leaves 5–12 cm, pointed, finely serrated, leathery and conspicuously glossy — the shine separates it from other Prunus species.", "source": "lanuk_neobiota_kurz"},
+    {"text": "Leaf underside with a dense hair felt (LANUK wording 'dichter Haarfilz'); check the exact position of the hairs in the original.", "source": "lanuk_neobiota_kurz"},
+    {"text": "White, fragrant flowers, about 30 per cylindrical raceme (6–15 cm), upright then drooping; opens after leaf emergence.", "source": "lanuk_neobiota_kurz"},
+    {"text": "Cherries 8–10 mm, green → black-red → black, with a persistent calyx at the base.", "source": "lanuk_neobiota_kurz"}
+  ],
+  "phenology": [
+    {"window": "flowering", "months": "late May – early June", "source": "lanuk_neobiota_kurz"},
+    {"window": "fruiting", "months": "fruits ripe late August – September", "source": "lanuk_neobiota_kurz"}
+  ],
+  "lookalikes": [
+    {"taxon": "Prunus padus", "name_de": "Gewöhnliche Traubenkirsche (native)", "hint": "Flowers noticeably earlier; LANUK names it as the main confusion species.", "source": "lanuk_neobiota_kurz"},
+    {"taxon": "Frangula alnus", "name_de": "Faulbaum (native)", "hint": "Assumed confusion species for the simulated classifier only — not from LANUK. Validate with local botanists.", "source": null},
+    {"taxon": "Prunus avium", "name_de": "Vogel-Kirsche (native)", "hint": "Assumed confusion species for the simulated classifier only — not from LANUK. Validate with local botanists.", "source": null}
+  ],
+  "impacts": [
+    {"text": "Forms a dense, closed shrub layer that strongly restricts tree regeneration in forests.", "source": "lanuk_neobiota_inv"},
+    {"text": "As a semi-shade species it regenerates ahead of light-demanding oak, rowan and pine and shades them out.", "source": "lanuk_neobiota_inv"},
+    {"text": "Allelopathic substances additionally inhibit root growth of other seedlings.", "source": "lanuk_neobiota_inv"},
+    {"text": "Most problematic for nature conservation in open pine and oak woodland on sandy soils.", "source": "lanuk_neobiota_inv"}
+  ],
+  "lanuk_prioritisation_context": {
+    "note": "LANUK describes where control measures should have priority. The prototype only shows which of these facts are known for an observation. It never turns them into a recommendation; decisions stay with the responsible experts.",
+    "criteria": [
+      {"code": "near_protected", "text": "In or directly next to areas with rare and endangered species or biotopes."},
+      {"code": "early_invasion", "text": "Early-stage invasions with few trees."},
+      {"code": "low_infestation", "text": "Areas with low infestation."},
+      {"code": "fruiting_solitary", "text": "Fruiting solitary specimens."}
+    ],
+    "follow_up": "LANUK states that complete eradication is unrealistic and that treated areas need follow-up monitoring for several years (stump sprouting, root fragments).",
+    "source": "lanuk_neobiota_mass"
+  },
+  "sources": {
+    "lanuk_neobiota_kurz": {"title": "Neobiota in NRW — Spätblühende Traubenkirsche, Kurzbeschreibung", "publisher": "LANUK NRW", "url": "https://neobiota.naturschutzinformationen.nrw.de/neobiota/de/arten/pflanzen/148392/kurzbeschreibung", "retrieved": "2026-09-26"},
+    "lanuk_neobiota_inv": {"title": "Neobiota in NRW — Spätblühende Traubenkirsche, Invasivität", "publisher": "LANUK NRW", "url": "https://neobiota.naturschutzinformationen.nrw.de/neobiota/de/arten/pflanzen/148392/invasivitaet", "retrieved": "2026-09-26"},
+    "lanuk_neobiota_mass": {"title": "Neobiota in NRW — Spätblühende Traubenkirsche, Maßnahmen", "publisher": "LANUK NRW", "url": "https://neobiota.naturschutzinformationen.nrw.de/neobiota/de/arten/pflanzen/148392/massnahmen", "retrieved": "2026-09-26"},
+    "lanuk_monitoring": {"title": "Biodiversitätsmonitoring NRW — Prunus serotina", "publisher": "LANUK NRW", "url": "https://www.biodiversitaetsmonitoring.nrw/monitoring/de/arten/pflanzen/prunus_serotina", "retrieved": "2026-09-26"},
+    "lanuk_fundpunkte": {"title": "Neobiota in NRW — Fundpunkte (public feature service)", "publisher": "LANUK NRW", "url": "https://neobiota.naturschutzinformationen.nrw.de/neobiota/de/fundpunkte/webapp", "retrieved": "2026-09-26"}
+  }
+}

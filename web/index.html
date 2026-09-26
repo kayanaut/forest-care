@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forest Care Bonn</title>
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Forest Care Bonn</h1>
+      <p>Monitoring <i>Prunus serotina</i> (Spätblühende Traubenkirsche) · research prototype</p>
+    </div>
+    <div id="sim-banner" class="sim-banner" hidden>
+      <b>Demo data.</b> Robot missions, images, review history and stand notes are <b>simulated</b>.
+      Map layers and reference data are real. <a href="#sources">What is real?</a>
+    </div>
+    <label class="reviewer">Reviewer
+      <input id="reviewer" placeholder="Your name" autocomplete="name">
+    </label>
+  </header>
+
+  <main class="layout">
+    <section class="map-wrap">
+      <div id="map" aria-label="Map of Bonn with monitored stands"></div>
+      <div class="map-toolbar">
+        <label>Observations from
+          <select id="year-filter"><option value="">all years</option></select>
+        </label>
+      </div>
+      <div class="legend" id="legend" aria-label="Map legend"></div>
+    </section>
+
+    <aside class="panel">
+      <nav class="tabs" role="tablist">
+        <a role="tab" href="#review" data-tab="review">Review <span class="count" id="count-review"></span></a>
+        <a role="tab" href="#stands" data-tab="stands">Stands <span class="count" id="count-inspect"></span></a>
+        <a role="tab" href="#missions" data-tab="missions">Missions</a>
+        <a role="tab" href="#sources" data-tab="sources">Data &amp; provenance</a>
+      </nav>
+      <div id="panel-body" class="panel-body" aria-live="polite"></div>
+    </aside>
+  </main>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
