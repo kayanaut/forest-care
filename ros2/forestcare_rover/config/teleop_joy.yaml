@@ -1,0 +1,25 @@
+# Joystick teleoperation and mark buttons. Button/axis numbers depend on the gamepad and the joy
+# driver: check them with `ros2 topic echo /joy` before the first field day.
+joy_node:
+  ros__parameters:
+    deadzone: 0.1
+    autorepeat_rate: 20.0         # keeps /cmd_vel flowing while the deadman is held
+
+teleop_twist_joy_node:
+  ros__parameters:
+    require_enable_button: true   # deadman: the rover only moves while this button is held
+    enable_button: 4              # LB on Xbox / F710 layouts
+    enable_turbo_button: -1       # no turbo in the forest
+    axis_linear:
+      x: 1                        # left stick forward/back
+    scale_linear:
+      x: 0.5                      # m/s at full stick: slow enough to stop before a stump in the grass
+    axis_angular:
+      yaw: 3                      # right stick left/right
+    scale_angular:
+      yaw: 0.8                    # rad/s
+
+forestcare_mark:
+  ros__parameters:
+    buttons: [0, 1, 3]            # A, B, Y
+    labels: ["Prunus serotina?", "other plant of interest", "REF"]

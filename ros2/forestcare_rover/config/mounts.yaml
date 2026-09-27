@@ -1,0 +1,12 @@
+# Where each sensor sits on YOUR rover, relative to base_link (REP-103: x forward, y left, z up).
+# Metres and degrees; positive pitch tilts the sensor nose-down. Measure with a tape and a
+# protractor, and update this file whenever something is moved. rover.launch.py publishes these
+# as static transforms, so every rosbag carries them (/tf_static) for offline processing.
+#
+# The values below are placeholders for a small rover with a 1 m antenna mast.
+base_frame: base_link
+mounts:
+  gnss_link:   {x: 0.00, y: 0.00, z: 1.10, roll: 0.0, pitch: 0.0,  yaw: 0.0}   # antenna phase centre
+  camera_link: {x: 0.35, y: 0.00, z: 0.85, roll: 0.0, pitch: 15.0, yaw: 0.0}   # looks ahead, 15 deg down
+  imu_link:    {x: 0.00, y: 0.00, z: 0.30, roll: 0.0, pitch: 0.0,  yaw: 0.0}
+  laser:       {x: 0.25, y: 0.00, z: 0.55, roll: 0.0, pitch: 0.0,  yaw: 0.0}

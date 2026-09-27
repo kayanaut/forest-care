@@ -227,3 +227,11 @@ fieldset.labels p { flex-basis: 100%; margin: 2px 0 4px; }
 .import-form { display: grid; gap: 6px; }
 .import-form label { display: grid; gap: 2px; font-size: 12.5px; color: var(--text-secondary); }
 .import-report li { margin: 2px 0; }
+
+/* robot observations */
+circle.obs-mark, path.obs-mark { stroke: var(--grow) !important; }
+path.uncertainty, circle.uncertainty { stroke: var(--accent); fill: var(--accent); fill-opacity: .06; stroke-dasharray: 4 3; }
+path.uncertainty-selected { fill-opacity: .12; stroke-dasharray: none; }
+.img-wrap { position: relative; display: block; }
+.bbox { position: absolute; border: 2px solid var(--grow); box-shadow: 0 0 0 1px rgba(255,255,255,.8); border-radius: 3px; pointer-events: none; }
+.meta-json { max-height: 260px; overflow: auto; background: var(--surface-2); padding: 6px; border-radius: 6px; white-space: pre-wrap; }

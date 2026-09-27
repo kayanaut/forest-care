@@ -18,12 +18,21 @@ dev = [
     "httpx>=0.27",
     # Pinned to match the Chromium build already installed in ~/.cache/ms-playwright.
     "playwright==1.58.0",
+    # ROS 2 gateway, offline parts (bag conversion, demo bags, localization analysis); see ros2/README.md
+    "forestcare-gateway[offline]",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = ["browser: end-to-end test that drives the web UI in headless Chromium"]
+testpaths = ["tests", "ros2/forestcare_gateway/test"]
+pythonpath = ["ros2/forestcare_gateway"]
+markers = [
+    "browser: end-to-end test that drives the web UI in headless Chromium",
+    "ros: runs real ROS 2 nodes (needs /opt/ros/kilted and a colcon build of ros2/)",
+]
 filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
+
+[tool.uv.sources]
+forestcare-gateway = { path = "ros2/forestcare_gateway", editable = true }
 
 [build-system]
 requires = ["hatchling"]

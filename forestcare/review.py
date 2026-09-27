@@ -66,8 +66,21 @@ def priority(o: sqlite3.Row, facts: dict) -> tuple[int, list[str]]:
         score += 1
         reasons.append("Fruiting reported (relevant to LANUK's 'fruiting specimens' criterion)")
     if o["target_probability"] is None:
-        reasons.append("Field photo without model prediction: label it from the image")
+        if o["original_path"]:
+            reasons.append("Field photo without model prediction: label it from the image")
+        else:
+            label = mark_label(o)
+            as_label = f" as “{label}”" if label else ""
+            reasons.append(f"Marked by the robot operator{as_label}; no model prediction")
     return score, reasons
+
+
+def mark_label(o: sqlite3.Row) -> str | None:
+    """The operator's label for a robot observation marked by hand (stored in its metadata)."""
+    if not o["metadata_json"]:
+        return None
+    mark = json.loads(o["metadata_json"]).get("mark") or {}
+    return mark.get("label")
 
 
 def review_queue(conn: sqlite3.Connection, limit: int = 500) -> list[dict]:
@@ -82,7 +95,7 @@ def review_queue(conn: sqlite3.Connection, limit: int = 500) -> list[dict]:
             "phenology": o["phenology"], "plant_count_est": o["plant_count_est"],
             "image_url": f"/api/images/{o['image_path']}" if o["image_path"] else None,
             "qc_flags": json.loads(o["qc_flags_json"]), "source_kind": o["source_kind"],
-            "original_filename": o["original_filename"],
+            "original_filename": o["original_filename"], "mark_label": mark_label(o),
             "priority_score": score, "priority_reasons": reasons,
         })
     items.sort(key=lambda i: (-i["priority_score"], i["observed_at"]))

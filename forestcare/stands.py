@@ -69,12 +69,13 @@ def plant_count(o: sqlite3.Row) -> int:
     """Plants a confirmed observation contributes to a count.
 
     An expert's count label wins. Otherwise transect detections use the device's
-    estimate. Unlabelled field photos prove presence but do not count plants (0).
+    estimate. Observations without a count (unlabelled field photos, operator
+    marks) and anything from opportunistic missions prove presence but count 0.
     """
     if o["label_plant_count"] is not None:
         return o["label_plant_count"]
-    if o["protocol"] == "transect":
-        return o["plant_count_est"] or 1
+    if o["protocol"] == "transect" and o["plant_count_est"] is not None:
+        return o["plant_count_est"]
     return 0
 
 

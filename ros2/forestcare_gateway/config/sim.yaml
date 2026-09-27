@@ -1,0 +1,16 @@
+# Gateway settings for the simulated rover (sim_rover node / demo bags).
+# Everything recorded with these settings is labelled 'simulated' in Forest Care.
+forestcare_gateway:
+  ros__parameters:
+    robot_id: sim-rover
+    source_kind: simulated
+    survey_protocol: opportunistic
+    outbox_dir: ~/forestcare_outbox
+    api_url: http://127.0.0.1:8000
+    upload_on_finish: true
+    simulator:
+      name: forestcare_gateway.sim
+      version: 0.1.0
+    detections:
+      model_name: mock-perception (simulated)
+      model_version: "0.1"

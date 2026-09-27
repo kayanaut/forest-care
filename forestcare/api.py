@@ -132,7 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def get_observations(year: int | None = None, status: str | None = None, stand_id: str | None = None,
                          conn: sqlite3.Connection = Depends(db)) -> list[dict]:
         sql = ("SELECT id, uid, mission_id, stand_id, observed_at, lat, lon, gnss_accuracy_m, predicted_taxon,"
-               " target_probability, plant_count_est, phenology, review_status, source_kind, image_path"
+               " target_probability, plant_count_est, phenology, review_status, source_kind, image_path, original_path"
                " FROM observations WHERE 1=1")
         args: list = []
         if year:
@@ -148,6 +148,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for r in rows:
             path = r.pop("image_path")
             r["image_url"] = f"/api/images/{path}" if path else None
+            # detection = classifier output; mark = flagged by a person on the robot; photo = field photo
+            r["kind"] = "photo" if r.pop("original_path") else ("mark" if r["target_probability"] is None else "detection")
         return rows
 
     @app.get("/api/observations/{obs_id}", tags=["review"])

@@ -4,36 +4,12 @@ External map tiles are blocked so the test does not depend on the network.
 Run only this file with:  uv run pytest -m browser
 """
 
-import socket
-import threading
-import time
-
 import pytest
 
 pytest.importorskip("playwright.sync_api")
 from playwright.sync_api import Error as PlaywrightError, expect, sync_playwright  # noqa: E402
 
-from forestcare.api import create_app  # noqa: E402
-
 pytestmark = pytest.mark.browser
-
-
-@pytest.fixture
-def server_url(seeded_settings):
-    import uvicorn
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(create_app(seeded_settings), host="127.0.0.1", port=port, log_level="warning"))
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    for _ in range(100):
-        if server.started:
-            break
-        time.sleep(0.05)
-    yield f"http://127.0.0.1:{port}"
-    server.should_exit = True
-    thread.join(timeout=5)
 
 
 @pytest.fixture

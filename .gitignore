@@ -1,5 +1,10 @@
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
+build/
 data/runtime/
+*.egg-info/
+*.pyc
+__pycache__/
+.pytest_cache/
+ros2/build/
+ros2/install/
+ros2/log/
+.venv/

@@ -1,0 +1,19 @@
+# Gateway settings for the real rover (see forestcare_gateway/config/gateway.yaml for every option).
+forestcare_gateway:
+  ros__parameters:
+    robot_id: rover-01
+    source_kind: robot
+    survey_protocol: opportunistic      # the operator marks what they notice: presence only
+    outbox_dir: ~/forestcare_outbox
+    api_url: http://127.0.0.1:8000      # the Forest Care server, e.g. via the field laptop
+    upload_on_finish: true
+    camera:
+      name: front camera (placeholder model)
+      forward_offset_m: 3.0             # FIELD
+      placement_sigma_m: 2.0            # FIELD
+      time_offset_s: 0.0                # FIELD: from the preflight clock check
+    gnss:
+      name: GNSS receiver (placeholder model)
+    localization:
+      method: gnss                      # FIELD: from the localization test (docs/LOCALIZATION_VALIDATION.md)
+      sigma_scale: 1.0                  # FIELD: from the localization test (recommended_gateway.yaml)

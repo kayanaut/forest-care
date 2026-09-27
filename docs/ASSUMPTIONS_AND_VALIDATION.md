@@ -1,11 +1,11 @@
 # What works, what is simulated, what needs validation
 
-Status as of 2026-09-26.
+Status as of 2026-09-27.
 
 ## What works (and is tested)
 
-85 automated tests (`uv run pytest`) pass, including three that drive the real web UI in
-headless Chromium.
+139 automated tests (`uv run pytest`) pass, including five that drive the real web UI in
+headless Chromium and two that run real ROS 2 (Kilted) nodes.
 
 | Capability | Evidence |
 |---|---|
@@ -34,6 +34,11 @@ headless Chromium.
 | Photos are presence-only: never coverage, a rejected photo is no evidence of absence, uncounted presence is not a trend | `test_photo_walk_never_counts_as_coverage`, `test_rejected_photo_is_not_evidence_of_absence`, `test_uncounted_photo_confirms_presence_but_not_a_trend` |
 | Schema migration from the robot-only database keeps all rows | `test_migration_from_v1_keeps_data` |
 | UI: import photos through the browser form, label one, download the identical original | `test_import_photo_folder_and_label_in_the_ui` |
+| ROS 2 gateway: rosbag → mission package → API → dashboard, operator marks and detections, contract 1.1 | `tests/test_gateway_journey.py` (incl. a browser test of the robot capture panel) |
+| Gateway recorder, time association, offline outbox, resumable and idempotent upload, crash recovery, frame integrity | `ros2/forestcare_gateway/test/` |
+| Live ROS 2 (Kilted): `ros2 bag play --clock` through the live node; teleoperated practice mission recorded with `record_mission.sh`, converted and uploaded | `tests/test_ros_live.py` (`uv run pytest -m ros`) |
+| Simulator data is always labelled simulated, even with a real-rover configuration | `test_simulator_bags_are_always_labelled_simulated` |
+| Localization experiment: seven setups on the same runs, report, calibrated uncertainty, recommended settings; the experiment's stands equal the backend's; the dashboard shows the validation | `tests/test_localization_journey.py`, `ros2/forestcare_gateway/test/test_localization.py` |
 
 Also checked by hand with screenshots: light and dark themes, and a 390 px phone width
 without horizontal scrolling.
@@ -51,6 +56,8 @@ without horizontal scrolling.
 | Stand log entries (one management action, one monitoring decision) | **Simulated** | named "Demo forester/ecologist (simulated)" |
 | Demo photo walk (6 imported photos, plus 1 duplicate, 2 rejected and 1 non-image file) | **Synthetic drawings** with real EXIF structure | "SYNTHETIC TEST PHOTO" in pixels and EXIF, so the importer stores them as `simulated` |
 | Photo import itself (EXIF reading, storage, hashing, review) | **Real code path**; tested with generated JPEGs, not yet with a real phone or camera folder | — |
+| Rover sensor data (GNSS, RTK, IMU, odometry, LiDAR, camera frames, operator) for the ROS 2 gateway | **Simulated** (`ros2/forestcare_gateway/forestcare_gateway/sim.py`); no physical rover has driven yet | `/sim/ground_truth` in every simulator bag forces `source_kind = simulated` |
+| Localization results (which setup is sufficient) | **Simulated** until the field test ([LOCALIZATION_VALIDATION.md](LOCALIZATION_VALIDATION.md)) | "Simulated data" banner in the report; SIMULATED badge on the validation shown in the dashboard |
 | Bonn districts, land use, NSG, FFH, biotopes, GBIF records, LANUK Neobiota counts | **Real**, snapshots of 2026-09-26 | green "real" badge; manifest with licence and hash |
 | Species facts and ID hints | **Real**, summarised from LANUK pages with a citation per statement | sources listed in the UI |
 | Orthophotos and forest layers | **Real**, live WMS | "live" badge in the layer switcher |
@@ -107,9 +114,13 @@ choices, not validated values.
 9. **Detection range and coverage.** We assume a 10 m camera range each side of the
    track. The real range depends on undergrowth density and camera placement, and it
    decides whether "not re-detected" is trustworthy.
-10. **GNSS under canopy.** We assume the receiver reports honest 1σ accuracy. Real
-    multipath under Kottenforst oaks may be worse and under-reported. RTK or visual
-    odometry may be needed before stand-level trends are reliable.
+10. **GNSS under canopy and stand separation.** Receivers under-report their error under
+    canopy, and multipath under Kottenforst oaks may be worse than simulated. The
+    [localization test](LOCALIZATION_VALIDATION.md) measures the real error and calibrates
+    the uncertainty the dashboard shows. It needs one number from the ecologists: how
+    close can two stands be that are managed separately? The test uses 20 m. In
+    simulation, only RTK + wheel odometry + IMU keeps stands that close apart; GNSS alone
+    needs about 27 m.
 11. **Plant counts from images** are optimistic in the simulation. Counting stems in
     dense *P. serotina* thickets from a ground camera is hard, and counts should be
     treated as lower bounds or replaced by cover classes.

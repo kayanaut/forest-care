@@ -27,6 +27,13 @@ The robot interface is a small JSON contract rather than a middleware stack (ROS
 message queue). A real robot, or a gateway script on its companion computer, posts one
 mission when it is back in range. Re-sending the same mission is safe.
 
+That gateway exists for ROS 2: `ros2/forestcare_gateway` turns live topics or a recorded
+rosbag into this contract, so the web service needs no ROS at all
+([ROS2_GATEWAY.md](ROS2_GATEWAY.md)). The rover is a data source; it makes no ecological
+decisions. [FIELD_DATA_COLLECTION.md](FIELD_DATA_COLLECTION.md) covers the teleoperated
+rover, and [LOCALIZATION_VALIDATION.md](LOCALIZATION_VALIDATION.md) the test of whether its
+positions are good enough to find the same stand again.
+
 Things this prototype deliberately does not have: user accounts, multiple species,
 PostGIS, tiled vector layers, a mobile field app. See "Growth path" below.
 
@@ -34,9 +41,9 @@ PostGIS, tiled vector layers, a mobile field app. See "Growth path" below.
 
 ```mermaid
 flowchart LR
-  subgraph Robot["Robot (simulated for now)"]
-    R1[Transect drive + camera] --> R2[On-board classifier<br/>p(P. serotina)]
-    R2 --> R3[Mission JSON<br/>track + detections + images]
+  subgraph Robot["Rover with ROS 2 (simulated so far)"]
+    R1[Camera · GNSS · IMU · odometry<br/>operator marks · optional detector] --> R2[rosbag2 / live topics]
+    R2 --> R3[forestcare_gateway<br/>localize · assemble · outbox]
   end
   subgraph Server["forestcare (FastAPI + SQLite)"]
     I[Ingest<br/>validate · Bonn filter · QC flags] --> C[Context capture<br/>district · land use · NSG/FFH · biotopes · GBIF]
@@ -70,6 +77,8 @@ flowchart LR
 | `forestcare/export.py` | Stands GeoJSON and a draft in LANUK Neobiota field format |
 | `forestcare/api.py` | HTTP API and static UI (`/docs` has the OpenAPI description) |
 | `simulator/` | Ground-truth world, robot missions, image drawings, synthetic geotagged test photos, simulated reviewer |
+| `ros2/forestcare_gateway/` | ROS 2 → mission contract: recorder, localization (incl. the offline fusion filter), mission assembly, resumable upload, rover simulator, localization experiment. Plain Python; ROS only for the live nodes. |
+| `ros2/forestcare_rover/` | Rover bring-up: driver and mount templates, gamepad teleoperation, mark buttons, `record_mission.sh` |
 | `web/` | Map, review queue, stand history, missions, data & provenance |
 
 ## Workflow
@@ -277,13 +286,21 @@ Every record says where it came from:
 The response lists accepted, duplicate and rejected detections, each rejection with a
 reason. The full generated payloads are in `data/runtime/sim_payloads/` after seeding.
 
-What a real robot integration needs:
+Version 1.1 added optional fields for the ROS 2 gateway, all backwards compatible
+([details](ROS2_GATEWAY.md#contract-changes-api-11)):
 
-- set `source_kind` to `robot`
-- send JPEGs rather than SVG drawings
-- report honest GNSS accuracy (1σ)
-- send the track that was actually driven, including gaps
-- keep `uid`s stable across retries
+- `metadata` per observation and per mission: pose, GNSS status, time sync, frame hash,
+  localization method and its validation, reference marks;
+- empty model fields and `plant_count_est: null` for operator marks;
+- `protocol`: `transect` or `opportunistic` (presence-only; absence is never inferred).
+
+What a real robot integration needs, and what the gateway does:
+
+- set `source_kind` to `robot`;
+- send JPEGs rather than SVG drawings;
+- report honest GNSS accuracy (1σ), calibrated by the localization test;
+- send the track that was actually driven, including gaps;
+- keep `uid`s stable across retries.
 
 ## Growth path
 
@@ -293,8 +310,9 @@ The next steps once the workflow is validated, roughly in order:
    beyond a typed name.
 2. **Expert tools for stands:** merge, split and move stands, plus a field-visit
    checklist export.
-3. **Real imagery:** robot JPEG capture with EXIF/GNSS cross-checks, several frames per
-   detection, HEIC support for iPhone photos, and manual placement of photos without GPS.
+3. **Real imagery and positions:** drive the rover in the field (the gateway already sends
+   its JPEG frames with a SHA-256 check) and run the localization test. Add HEIC support
+   for iPhone photos and manual placement of photos without GPS.
 4. **Model feedback loop:** export reviewed images as a labelled dataset, then retrain.
    The Missions tab already shows review outcomes by model probability.
 5. **Scale** only if needed: PostGIS for geometry, object storage for images, and a

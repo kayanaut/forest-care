@@ -100,10 +100,12 @@ function setupMap(reference) {
   layers.observations = L.layerGroup().addTo(map);
   layers.stands = L.layerGroup().addTo(map);
   layers.highlight = L.layerGroup().addTo(map);
+  layers.uncertainty = L.layerGroup();
 
   L.control.layers(bases, {
     'Stands (robot + review)': layers.stands,
     'Robot observations': layers.observations,
+    'Position uncertainty (95% circles)': layers.uncertainty,
     'Mission tracks': layers.tracks,
     'GBIF records of P. serotina <span class="badge real">real</span>': layers.gbif,
     'Naturschutzgebiete (LANUK) <span class="badge real">real</span>': layers.nsg,
@@ -136,11 +138,15 @@ function drawStands() {
 
 function drawObservations() {
   layers.observations.clearLayers();
+  layers.uncertainty.clearLayers();
   for (const o of state.observations) {
     if (state.year && !o.observed_at.startsWith(state.year)) continue;
-    L.circleMarker([o.lat, o.lon], { radius: o.target_probability == null ? 5 : 4, weight: 2,
-      className: `obs obs-${o.review_status}${o.target_probability == null ? ' obs-photo' : ''}` })
-      .bindTooltip(`${esc(o.uid)}<br>${esc(REVIEW_LABEL[o.review_status])} · ${o.target_probability == null ? 'field photo' : `p(P. serotina) ${pct(o.target_probability)}`}`)
+    const what = { photo: 'field photo', mark: 'operator mark' }[o.kind] || `p(P. serotina) ${pct(o.target_probability)}`;
+    L.circle([o.lat, o.lon], { radius: 2.45 * o.gnss_accuracy_m, className: 'uncertainty', weight: 1, interactive: false })
+      .addTo(layers.uncertainty);
+    L.circleMarker([o.lat, o.lon], { radius: o.kind === 'detection' ? 4 : 5, weight: 2,
+      className: `obs obs-${o.review_status}${o.kind === 'photo' ? ' obs-photo' : ''}${o.kind === 'mark' ? ' obs-mark' : ''}` })
+      .bindTooltip(`${esc(o.uid)}<br>${esc(REVIEW_LABEL[o.review_status])} · ${what} · ±${o.gnss_accuracy_m} m`)
       .on('click', () => { location.hash = `#obs/${o.id}`; })
       .addTo(layers.observations);
   }
@@ -151,16 +157,21 @@ function drawTracks(highlightId = null) {
   for (const m of state.missions) {
     if (state.year && String(m.year) !== state.year && m.id !== highlightId) continue;
     L.polyline(m.track.map((line) => line.map(([lon, lat]) => [lat, lon])), {
-      className: `track${m.protocol === 'opportunistic' ? ' track-photo' : ''}${m.id === highlightId ? ' track-selected' : ''}`,
+      className: `track${m.detection_range_m == null ? ' track-photo' : ''}${m.id === highlightId ? ' track-selected' : ''}`,
       weight: m.id === highlightId ? 3 : 1.5,
     }).bindTooltip(`${esc(m.id)} · ${esc(m.area_name)} · ${fmtDate(m.started_at)}`).addTo(layers.tracks);
   }
 }
 
-function highlight(lat, lon, zoom = 18) {
+function highlight(lat, lon, zoom = 18, sigma = null) {
   layers.highlight.clearLayers();
+  if (sigma) {   // 95% region of a 2D Gaussian: 2.45 sigma, if the reported sigma is honest
+    L.circle([lat, lon], { radius: 2.45 * sigma, className: 'uncertainty uncertainty-selected', weight: 2, interactive: false })
+      .bindTooltip(`95% position region: ${(2.45 * sigma).toFixed(1)} m radius (1σ = ${sigma} m)`, { permanent: false })
+      .addTo(layers.highlight);
+  }
   L.circleMarker([lat, lon], { radius: 14, className: 'highlight-ring', weight: 3, fill: false, interactive: false }).addTo(layers.highlight);
-  map.setView([lat, lon], Math.max(map.getZoom(), zoom));
+  map.setView([lat, lon], sigma && 2.45 * sigma > 25 ? Math.max(map.getZoom(), 16) : Math.max(map.getZoom(), zoom));
 }
 
 function drawLegend() {
@@ -175,6 +186,8 @@ function drawLegend() {
     <div class="row"><svg width="14" height="14"><circle class="obs obs-confirmed" cx="7" cy="7" r="4" stroke-width="2"/></svg> confirmed</div>
     <div class="row"><svg width="14" height="14"><circle class="obs obs-rejected" cx="7" cy="7" r="4" stroke-width="2"/></svg> rejected</div>
     <div class="row"><svg width="14" height="14"><circle class="obs obs-pending obs-photo" cx="7" cy="7" r="5" stroke-width="2"/></svg> field photo (blue outline)</div>
+    <div class="row"><svg width="14" height="14"><circle class="obs obs-pending obs-mark" cx="7" cy="7" r="5" stroke-width="2"/></svg> operator mark (robot)</div>
+    <div class="row"><svg width="14" height="14"><circle class="uncertainty" cx="7" cy="7" r="6" stroke-width="1"/></svg> 95% position region</div>
     <div class="row"><div class="gbif-marker" style="margin:0 2px"></div> external GBIF record</div></details>`;
 }
 
@@ -226,7 +239,9 @@ function viewReviewList() {
             <div class="row-flex"><b class="mono grow1">${esc(o.uid)}</b>${sourceBadge(o.source_kind)}</div>
             <div class="small muted">${fmtDate(o.observed_at)} · stand ${esc(o.stand_id)}${s ? ` (${esc(state.meta.statuses[s.status].label)})` : ''}</div>
             ${o.target_probability == null
-              ? `<div class="small">Field photo · ${esc(o.original_filename)}</div><div class="small muted">no model prediction</div>`
+              ? (o.original_filename
+                ? `<div class="small">Field photo · ${esc(o.original_filename)}</div><div class="small muted">no model prediction</div>`
+                : `<div class="small">Operator mark · “${esc(o.mark_label || 'marked')}”</div><div class="small muted">no model prediction</div>`)
               : `<div class="small">p(<i>P. serotina</i>) ${pct(o.target_probability)}</div>
             <div class="pbar"><span style="width:${pct(o.target_probability)}"></span></div>`}
           </div>
@@ -251,6 +266,53 @@ function modelSection(o) {
       <dt>Reported</dt><dd>${esc(o.plant_count_est ?? '?')} plant(s) · ${esc(o.height_class ?? '–')} · ${esc(o.phenology ?? '–')}</dd>
       <dt>Model</dt><dd class="mono">${esc(o.provenance.model.name)} ${esc(o.provenance.model.version)}</dd>
     </dl>`;
+}
+
+function bboxOverlay(o) {
+  const box = o.metadata?.detection?.bbox;
+  const frame = o.metadata?.capture?.frame;
+  if (!box || !frame?.width || !frame?.height) return '';
+  const pc = (v, total) => `${(100 * v / total).toFixed(2)}%`;
+  return `<span class="bbox" title="detection box" style="left:${pc(box.cx - box.w / 2, frame.width)};top:${pc(box.cy - box.h / 2, frame.height)};width:${pc(box.w, frame.width)};height:${pc(box.h, frame.height)}"></span>`;
+}
+
+const GNSS_STATUS = { '-1': 'no fix', 0: 'fix', 1: 'SBAS-corrected fix', 2: 'differential / RTK fix' };
+
+function robotSection(o) {
+  const m = o.metadata;
+  const loc = m.localization || {};
+  const robot = m.robot || {};
+  const frame = m.capture?.frame;
+  const mark = m.mark;
+  const same = frame && frame.sha256 === o.provenance.image_sha256;
+  return `<h3>Robot capture</h3>
+    ${mark ? `<p class="small">Marked by the operator as <b>“${esc(mark.label)}”</b>${mark.note ? ` (${esc(mark.note)})` : ''}${mark.source ? ` via ${esc(mark.source)}` : ''}.
+      No model prediction: your decision is the identification.${mark.frame_dt_s != null ? ` The image is the frame shown ${Math.abs(mark.frame_dt_s).toFixed(2)} s ${mark.frame_dt_s <= 0 ? 'before' : 'after'} the button press.` : ''}</p>` : ''}
+    <dl class="kv">
+      <dt>Position</dt><dd>±${esc(o.gnss_accuracy_m)} m (1σ), 95% within ${(2.45 * o.gnss_accuracy_m).toFixed(1)} m
+        <div class="small muted">${esc(loc.method_label || loc.method || '')}; robot ±${esc(loc.robot_sigma_m)} m${loc.accuracy_scale && loc.accuracy_scale !== 1 ? `, reported GNSS accuracy ×${esc(loc.accuracy_scale)}` : ''}${loc.sigma_scale && loc.sigma_scale !== 1 ? `, uncertainty ×${esc(loc.sigma_scale)} (calibrated)` : ''}</div></dd>
+      <dt>Localization test</dt><dd>${localizationCheck(loc)}</dd>
+      <dt>Placement</dt><dd class="small">${esc(m.placement?.method || '')}: ${esc(m.placement?.forward_offset_m)} m ahead${m.placement?.yaw_offset_deg ? `, ${esc(m.placement.yaw_offset_deg)}° to the side` : ''}, ±${esc(m.placement?.sigma_m)} m</dd>
+      <dt>GNSS</dt><dd>${loc.fused ? 'fused with odometry/IMU: the position above is the filter’s estimate'
+          : `${loc.gnss_status != null ? esc(GNSS_STATUS[loc.gnss_status] || loc.gnss_status) : '–'}${loc.reported_sigma_m != null ? `, reported ±${esc(Number(loc.reported_sigma_m).toFixed(2))} m` : ', no covariance reported'}`}
+        <div class="small muted">${loc.interpolated ? `interpolated between ${loc.fused ? 'filter outputs' : 'fixes'}` : `nearest ${loc.fused ? 'filter output' : 'fix'}`}, ${esc(loc.sample_dt_s)} s from the image</div></dd>
+      <dt>Heading</dt><dd>${robot.heading_deg != null ? `${Math.round(robot.heading_deg)}° (${compass(robot.heading_deg)})` : 'unknown'} <span class="small muted">${esc(robot.heading_source || '')}</span></dd>
+      <dt>Odometry</dt><dd>${robot.odometry ? `${esc(robot.odometry.speed_mps)} m/s, yaw ${esc(robot.odometry.yaw_deg)}° (${esc(robot.odometry.frame_id)})` : '–'}</dd>
+      <dt>IMU</dt><dd>${robot.imu && robot.imu.roll_deg != null ? `roll ${esc(robot.imu.roll_deg)}°, pitch ${esc(robot.imu.pitch_deg)}°` : (robot.imu ? 'no orientation' : '–')}</dd>
+      <dt>Frame</dt><dd>${frame ? `${esc(frame.width)}×${esc(frame.height)} ${esc(frame.fmt)}, ${esc(frame.camera)}<div class="small muted mono">${esc(frame.sha256.slice(0, 16))}… ${same ? '✓ identical to the recorded ROS frame' : ''}</div>` : 'no frame'}</dd>
+    </dl>
+    <details><summary class="small">All capture metadata</summary><pre class="small mono meta-json">${esc(JSON.stringify(m, null, 1))}</pre></details>`;
+}
+
+// Result of the repeated-run localization experiment (fc_gateway loc-eval), carried in the metadata
+function localizationCheck(loc) {
+  const v = loc.validated;
+  if (!v) return '<span class="small muted">not checked yet: the circle is the robot’s own estimate and can be too small under trees</span>';
+  const facts = [`same plant within ${esc(v.observation_repeat_p95_m)} m in 95% of repeats`];
+  if (v.stand_separation_m != null) facts.push(`stands ≥ ${esc(v.stand_separation_m)} m apart stay separate`);
+  if (v.reidentified) facts.push(`${esc(v.reidentified)} tagged plants re-found`);
+  return `${esc(v.experiment)}, ${esc(v.runs)} runs, ${esc(v.date)}${v.simulated ? ' <span class="badge sim">SIMULATED</span>' : ''}
+    <div class="small muted">${facts.join('; ')}${v.sufficient === false ? '; did not meet the criteria' : ''}</div>`;
 }
 
 function exifTable(exif) {
@@ -288,8 +350,8 @@ function labelFields(o, latest) {
       <label class="small">Plants <input type="number" id="label-count" min="1" max="10000" value="${esc(count)}" placeholder="?"></label>
       <label class="small">Height <select id="label-height">${opts(HEIGHTS, height)}</select></label>
       <label class="small">Phenology <select id="label-phen">${opts(PHENOLOGY, phen)}</select></label>
-      <p class="small muted">${o.original_url
-        ? 'A photo carries no plant count. Without a count the stand counts as present, but it is not used for trends.'
+      <p class="small muted">${o.original_url || o.target_probability == null
+        ? `${o.original_url ? 'A photo' : 'An operator mark'} carries no plant count. Without a count the stand counts as present, but it is not used for trends.`
         : 'Pre-filled with the robot’s estimate. Only values you change are stored as your label.'}</p>
     </fieldset>`;
 }
@@ -299,7 +361,8 @@ async function viewObservation(id) {
   const stand = state.stands.find((s) => s.id === o.stand_id);
   const ctx = o.context;
   const isPhoto = Boolean(o.original_url);
-  highlight(o.lat, o.lon);
+  const hasModel = o.target_probability != null;
+  highlight(o.lat, o.lon, 18, o.gnss_accuracy_m);
   const latest = o.reviews.at(-1);
   const inQueue = state.queue.findIndex((q) => q.id === o.id);
   const areas = [...ctx.nsg.map((a) => ({ ...a, kind: 'NSG' })), ...ctx.ffh.map((a) => ({ ...a, kind: 'FFH' }))];
@@ -307,8 +370,8 @@ async function viewObservation(id) {
     <button class="back" data-href="#review">← Review queue</button>
     <div class="row-flex"><h2 class="grow1 mono">${esc(o.uid)}</h2>${sourceBadge(o.source_kind)}</div>
     <p class="small muted">${esc(bonnTime(o.observed_at))} (Bonn time) · ${isPhoto ? 'photo mission' : 'mission'} ${esc(o.mission_id)} · ${esc(REVIEW_LABEL[o.review_status])}</p>
-    ${o.image_url ? `<a href="${esc(o.image_url)}" target="_blank" rel="noopener" title="Open full size"><img class="big-image" src="${esc(o.image_url)}" alt="${isPhoto ? 'Field photo' : 'Camera frame'} ${esc(o.uid)}"></a>` : '<p class="muted">No image was sent.</p>'}
-    ${isPhoto ? photoSection(o) : modelSection(o)}
+    ${o.image_url ? `<a class="img-wrap" href="${esc(o.image_url)}" target="_blank" rel="noopener" title="Open full size"><img class="big-image" src="${esc(o.image_url)}" alt="${isPhoto ? 'Field photo' : 'Camera frame'} ${esc(o.uid)}">${bboxOverlay(o)}</a>` : '<p class="muted">No image was sent.</p>'}
+    ${isPhoto ? photoSection(o) : `${hasModel ? modelSection(o) : ''}${o.metadata ? robotSection(o) : ''}`}
     ${o.qc_flags.length ? `<div>${o.qc_flags.map((f) => `<span class="flag">${esc(f.replaceAll('_', ' '))}</span>`).join('')}</div>` : ''}
 
     <div class="decision">
@@ -645,7 +708,8 @@ function viewMissions(selected = null) {
     ${Object.entries(byYear).reverse().map(([y, ms]) => `<h3>${y}</h3><table><tbody>
       ${ms.map((m) => `<tr class="clickable" data-href="#mission/${esc(m.id)}" tabindex="0" ${m.id === selected ? 'style="font-weight:600"' : ''}>
         <td>${fmtDate(m.started_at)}</td><td>${esc(m.area_name ?? '')}<div class="small muted mono">${esc(m.id)}</div>
-        ${m.protocol === 'opportunistic' ? `<div class="small">Field photos by ${esc(m.provenance.photographer)} · presence only</div>` : ''}
+        ${m.detection_range_m == null ? `<div class="small">Field photos by ${esc(m.provenance.photographer)} · presence only</div>` : ''}
+        ${m.provenance.metadata?.gateway ? `<div class="small">ROS 2 gateway (${esc(m.provenance.metadata.source?.kind === 'bag' ? 'converted rosbag' : 'live')}) · ${esc(m.provenance.metadata.localization?.label || '')}${m.provenance.metadata.gnss?.reported_sigma_m ? ` · GNSS median ±${esc(m.provenance.metadata.gnss.reported_sigma_m.median)} m` : ''}${m.protocol === 'opportunistic' ? ' · presence only' : ''}</div>` : ''}
         ${m.notes ? `<div class="small">${esc(m.notes)}</div>` : ''}</td>
         <td class="num">${m.observations} ${m.protocol === 'opportunistic' ? 'photos' : 'det.'}</td><td>${sourceBadge(m.source_kind)}</td></tr>`).join('')}
       </tbody></table>`).join('')}

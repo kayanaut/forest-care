@@ -1,8 +1,16 @@
-"""Request schemas. `MissionIn` is the contract between a robot and the system."""
+"""Request schemas. `MissionIn` is the contract between a robot and the system.
+
+Contract history (all changes are additive; older payloads stay valid):
+  1.0  robot missions with classifier detections
+  1.1  optional `protocol`, `model` and `metadata` on missions; observations may carry no
+       model output (operator marks), no plant count, and a `metadata` dict with sensor,
+       pose and time-sync details. Added for the ROS 2 gateway (ros2/forestcare_gateway).
+"""
 
 from __future__ import annotations
 
-from typing import Literal
+import json
+from typing import Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, Field, field_validator, model_validator
 
@@ -23,22 +31,38 @@ class ImageIn(BaseModel):
     data_base64: str = Field(max_length=8_000_000)
 
 
+def _json_size(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, default=str))
+
+
 class ObservationIn(BaseModel):
-    """One candidate detection from the on-board classifier."""
+    """One observation: a candidate detection from an on-board classifier, or a point the
+    operator marked by hand (then the three model fields are empty)."""
 
     uid: str = Field(min_length=1, max_length=120, pattern=r"^[A-Za-z0-9._:-]+$")
     observed_at: AwareDatetime
     lat: float = Field(ge=-90, le=90)
     lon: float = Field(ge=-180, le=180)
-    gnss_accuracy_m: float = Field(gt=0, le=500, description="Estimated horizontal accuracy (1 sigma)")
-    predicted_taxon: str
-    confidence: float = Field(ge=0, le=1, description="Probability of predicted_taxon")
-    target_probability: float = Field(ge=0, le=1, description="Probability of Prunus serotina")
+    gnss_accuracy_m: float = Field(gt=0, le=500, description="Horizontal position uncertainty of the observation (1 sigma)")
+    predicted_taxon: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1, description="Probability of predicted_taxon")
+    target_probability: float | None = Field(default=None, ge=0, le=1, description="Probability of Prunus serotina")
     alternatives: list[Alternative] = Field(default_factory=list, max_length=10)
-    plant_count_est: int = Field(default=1, ge=1, le=10_000)
+    plant_count_est: int | None = Field(default=1, ge=1, le=10_000, description="null = not estimated")
     height_class: HeightClass | None = None
     phenology: Phenology | None = None
     image: ImageIn | None = None
+    metadata: dict[str, Any] | None = Field(default=None, description="Sensor, pose and time-sync details; stored as sent")
+
+    @model_validator(mode="after")
+    def _check(self) -> "ObservationIn":
+        model_fields = (self.predicted_taxon, self.confidence, self.target_probability)
+        if any(v is None for v in model_fields) and any(v is not None for v in model_fields):
+            raise ValueError("predicted_taxon, confidence and target_probability are sent together, "
+                             "or all left empty for an observation without model output")
+        if self.metadata is not None and _json_size(self.metadata) > 32_000:
+            raise ValueError("observation metadata is limited to 32 kB of JSON")
+        return self
 
 
 class SoftwareInfo(BaseModel):
@@ -55,10 +79,14 @@ class MissionIn(BaseModel):
     ended_at: AwareDatetime
     track: list[list[LonLat]] = Field(min_length=1, description="Driven path as MultiLineString coordinates [lon, lat]")
     detection_range_m: float = Field(gt=0, le=50, description="Max distance from the track at which the camera detects plants")
+    # 'transect': systematic survey; the track may be used to infer that a stand was not re-detected.
+    # 'opportunistic': the track is shown, but absence is never inferred from it.
+    protocol: Literal["transect", "opportunistic"] = "transect"
     sensors: dict[str, str] = Field(default_factory=dict)
-    model: SoftwareInfo
+    model: SoftwareInfo | None = Field(default=None, description="The detector used; null if nothing was classified")
     simulator: dict | None = None
     notes: str | None = Field(default=None, max_length=2000)
+    metadata: dict[str, Any] | None = Field(default=None, description="Recorder, bag and sensor summary; stored as sent")
     observations: list[ObservationIn] = Field(default_factory=list, max_length=5000)
 
     @model_validator(mode="after")
@@ -69,6 +97,10 @@ class MissionIn(BaseModel):
             raise ValueError("simulated missions must describe the simulator (version, seed)")
         if any(len(line) < 2 for line in self.track):
             raise ValueError("every track segment needs at least two points")
+        if self.model is None and any(o.target_probability is not None for o in self.observations):
+            raise ValueError("observations carry model output, so the mission must name the model")
+        if self.metadata is not None and _json_size(self.metadata) > 64_000:
+            raise ValueError("mission metadata is limited to 64 kB of JSON")
         return self
 
 

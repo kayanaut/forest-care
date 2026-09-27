@@ -1,0 +1,47 @@
+# Sensor drivers for YOUR rover. rover.launch.py starts one node per entry in `drivers`.
+#
+# This is the rover-specific part of the setup. The examples below are TEMPLATES for common
+# hardware: package, executable and parameter names differ between driver versions, so check each
+# against the README of the driver you install (none of them was run on real hardware here).
+# Remap every driver's output to the standard Forest Care topics, then nothing else has to change:
+#   /gnss/fix  /camera/image_raw/compressed  /camera/camera_info  /imu/data  /odom  /scan or /points
+drivers: []
+
+# ---------------------------------------------------------------------------------------------------
+# Examples: copy an entry into the list above and adapt it.
+#
+# - name: camera                          # USB camera; image_transport adds .../compressed (JPEG)
+#   package: usb_cam
+#   executable: usb_cam_node_exe
+#   parameters: {video_device: /dev/video0, image_width: 1280, image_height: 720, framerate: 10.0,
+#                pixel_format: mjpeg2rgb, camera_name: front_camera, frame_id: camera_link}
+#   remappings: {image_raw: /camera/image_raw, image_raw/compressed: /camera/image_raw/compressed,
+#                camera_info: /camera/camera_info}
+#
+# - name: gnss                            # u-blox ZED-F9P: multi-band, RTK-capable
+#   package: ublox_gps
+#   executable: ublox_gps_node
+#   parameters: {device: /dev/ttyACM0, frame_id: gnss_link}
+#   remappings: {fix: /gnss/fix}
+#
+# - name: ntrip                           # RTK corrections from SAPOS-HEPS (free in NRW after registering
+#   package: ntrip_client                 # with Bezirksregierung Koeln, Geobasis NRW); needs mobile data
+#   executable: ntrip_ros.py
+#   parameters: {host: <caster from your SAPOS registration>, port: 2101, mountpoint: <from SAPOS>,
+#                authenticate: true, username: <...>, password: <...>}
+#
+# - name: imu                             # e.g. BNO055 (9-DoF) over UART
+#   package: bno055
+#   executable: bno055
+#   parameters: {connection_type: uart, uart_port: /dev/ttyUSB0, frame_id: imu_link}
+#   remappings: {bno055/imu: /imu/data}
+#
+# - name: lidar                           # 2D: RPLIDAR; 3D (better in forest): Livox Mid-360, Ouster OS0
+#   package: rplidar_ros
+#   executable: rplidar_composition
+#   parameters: {serial_port: /dev/ttyUSB1, frame_id: laser, angle_compensate: true}
+#   remappings: {scan: /scan}
+#
+# - name: base                            # the rover's own driver: listens to /cmd_vel, publishes /odom
+#   package: <your_rover_driver>          # (wheel odometry) and ideally stops on its own if /cmd_vel
+#   executable: <executable>              # goes quiet (command timeout)

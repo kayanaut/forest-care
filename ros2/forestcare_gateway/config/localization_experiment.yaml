@@ -1,0 +1,55 @@
+# Localization experiment: the same route driven several times (docs/LOCALIZATION_VALIDATION.md).
+# Copy this file next to the mission folders, fill it in, then:
+#
+#   python -m forestcare_gateway loc-eval experiment.yaml --out results/
+#
+# Paths are relative to this file. Coordinates are WGS84/ETRS89 degrees (lat, lon).
+
+name: Kottenforst ride 7 loop, leaf-on        # appears in the report and in every observation's metadata
+
+# The runs, in the order they were driven. Each is a rosbag2 folder from record_mission.sh.
+runs:
+  - bag: 20261002T081530Z_ride7_run1/bag
+  - bag: 20261002T093010Z_ride7_run2/bag
+  - bag: 20261002T123400Z_ride7_run3/bag
+  - bag: 20261002T141200Z_ride7_run4/bag
+  - bag: 20261005T090000Z_ride7_run5/bag       # another day: different satellite geometry
+  # - name: run6                               # optional name; a bag that already contains
+  #   bag: run6_with_lidar_odometry/bag        #   /odom_lidar from an offline LiDAR odometry replay
+
+# The gateway configuration used for every run (the rover's), or inline settings.
+gateway_config: 20261002T081530Z_ride7_run1/config/gateway.yaml
+# gateway_config:
+#   topics: {gnss_rtk: /gnss_rtk/fix, odom_alt: /odom_lidar}
+
+current_method: gnss      # what the rover runs today; the report answers "is it sufficient?" for it first
+# methods: [gnss, gnss_odom_imu, rtk_odom]     # default: all seven, those without data are reported as unavailable
+
+# Surveyed reference points (marked in each run with 'REF:<id>'). Survey them to <= 0.3 m:
+# RTK pole in the open, tape and compass or a total station from there under trees.
+# Start and end every run on the first one: that also gives the odometry drift (loop closure).
+references:
+  R1: {lat: 50.6512700, lon: 7.0733600}
+  R2: {lat: 50.6512700, lon: 7.0742100}
+  R3: {lat: 50.6516300, lon: 7.0742100}
+  R4: {lat: 50.6516300, lon: 7.0733600}
+  # R5: {lat: ..., lon: ..., canopy: closed}  # optional: override the canopy class
+
+# Tagged plants (marked in each run with 'PLANT:<id> <label>', e.g. mark_console: 'plant P3').
+# Positions are optional: without them the analysis uses the mean of each plant's repeats.
+plants:
+  P1: {lat: 50.6512880, lon: 7.0737140}
+  P2: {lat: 50.6514500, lon: 7.0741820}
+# plant_order: [P1, P6, P2, P3, P4, P5]         # only if marks carry no tag: the order the operator marks them
+
+# Open-sky areas (rides, clearings), as polygons of [lon, lat]. Everything else counts as canopy;
+# within 6 m of an open area as "partial". Draw them from the orthophoto (e.g. in QGIS).
+canopy_zones:
+  open:
+    - [[7.07322, 50.65118], [7.07437, 50.65118], [7.07437, 50.65140], [7.07322, 50.65140]]
+
+# When is a setup good enough? ASSUMPTIONS to agree with the ecologists who use the stands.
+criteria:
+  reid_rate: 0.95               # share of tagged plants that land in one stand in every run
+  required_separation_m: 20.0   # two stands this far apart must stay separate
+  coverage_95: 0.90             # share of errors inside the dashboard's 95 % circle (after correction)

@@ -29,11 +29,14 @@ def qc_flags(obs: ObservationIn, ctx: dict, mission: MissionIn, t: Thresholds) -
     flags = []
     if obs.gnss_accuracy_m > t.poor_gnss_m:
         flags.append("poor_gnss")
-    lo, hi = t.ambiguous_band
-    if lo <= obs.target_probability <= hi:
-        flags.append("ambiguous_prediction")
-    if obs.predicted_taxon != TARGET_TAXON:
-        flags.append("predicted_other_taxon")
+    if obs.target_probability is None:
+        flags.append("no_model_prediction")
+    else:
+        lo, hi = t.ambiguous_band
+        if lo <= obs.target_probability <= hi:
+            flags.append("ambiguous_prediction")
+        if obs.predicted_taxon != TARGET_TAXON:
+            flags.append("predicted_other_taxon")
     if ctx["landuse"] is None:
         flags.append("outside_mapped_woodland")
     if obs.image is None:
@@ -124,14 +127,15 @@ def ingest_mission(conn: sqlite3.Connection, ref: ReferenceData, image_dir: Path
                    mission: MissionIn, actor: str) -> dict:
     now = now_iso()
     payload_sha = hashlib.sha256(mission.model_dump_json().encode()).hexdigest()
+    model = mission.model.model_dump() if mission.model else None
     insert_mission(
         conn, mission_id=mission.mission_id, robot_id=mission.robot_id, area_name=mission.area_name,
         started_at=to_utc_iso(mission.started_at), ended_at=to_utc_iso(mission.ended_at),
-        year=mission.started_at.year, protocol="transect", track=mission.track,
+        year=mission.started_at.year, protocol=mission.protocol, track=mission.track,
         detection_range_m=mission.detection_range_m, notes=mission.notes, source_kind=mission.source_kind,
-        provenance={"robot_id": mission.robot_id, "sensors": mission.sensors, "model": mission.model.model_dump(),
-                    "simulator": mission.simulator, "payload_sha256": payload_sha, "ingested_by": actor,
-                    "ingested_at": now},
+        provenance={"robot_id": mission.robot_id, "sensors": mission.sensors, "model": model,
+                    "simulator": mission.simulator, "metadata": mission.metadata, "payload_sha256": payload_sha,
+                    "ingested_by": actor, "ingested_at": now},
     )
 
     accepted, duplicates, rejected = 0, 0, []
@@ -157,10 +161,11 @@ def ingest_mission(conn: sqlite3.Connection, ref: ReferenceData, image_dir: Path
             alternatives_json=json.dumps([a.model_dump() for a in obs.alternatives]),
             plant_count_est=obs.plant_count_est, height_class=obs.height_class, phenology=obs.phenology,
             image_path=image_path, image_sha256=image_sha, qc_flags_json=json.dumps(qc_flags(obs, ctx, mission, t)),
+            metadata_json=json.dumps(obs.metadata, ensure_ascii=False) if obs.metadata else None,
             source_kind=mission.source_kind,
             provenance_json=json.dumps({
                 "source_kind": mission.source_kind, "robot_id": mission.robot_id, "mission_id": mission.mission_id,
-                "model": mission.model.model_dump(), "simulator": mission.simulator,
+                "model": model, "simulator": mission.simulator,
                 "mission_payload_sha256": payload_sha, "image_sha256": image_sha, "ingested_at": now,
             }),
         )

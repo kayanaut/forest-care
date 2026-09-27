@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import shutil
+import socket
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -91,3 +95,37 @@ def mission(mission_id: str, day: str, observations: list[dict], centre=KOTTENFO
         "track": track, "detection_range_m": 10.0, "model": {"name": "test-model", "version": "0"},
         "simulator": {"name": "pytest", "version": "0", "seed": 0}, "observations": observations,
     }
+
+
+@contextlib.contextmanager
+def running_server(settings: Settings):
+    """A real HTTP server (uvicorn in a thread) for tests that go over the network."""
+    import uvicorn
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(create_app(settings), host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    for _ in range(200):
+        if server.started:
+            break
+        time.sleep(0.05)
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+
+@pytest.fixture
+def server_url(seeded_settings):
+    with running_server(seeded_settings) as url:
+        yield url
+
+
+@pytest.fixture
+def empty_server_url(settings):
+    with running_server(settings) as url:
+        yield url

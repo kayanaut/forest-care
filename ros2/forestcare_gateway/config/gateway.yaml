@@ -1,0 +1,52 @@
+# Forest Care gateway settings (ROS 2 parameter file; also read by the offline tools:
+#   python -m forestcare_gateway convert BAG --config gateway.yaml).
+# Anything left out keeps the default from forestcare_gateway/config.py.
+# FIELD = an assumption to measure on the real rover (see docs/ROS2_GATEWAY.md).
+forestcare_gateway:
+  ros__parameters:
+    robot_id: rover-01
+    source_kind: robot                 # 'simulated' for the sim rover / demo bags
+    area_name: ""
+    survey_protocol: opportunistic     # 'transect' only for systematic surveys (enables absence inference)
+    detection_range_m: 8.0             # FIELD
+    outbox_dir: ~/forestcare_outbox
+    api_url: http://127.0.0.1:8000
+    upload_on_finish: true
+    auto_start: true                   # start a mission as soon as the node runs
+
+    topics:
+      gnss: /gnss/fix                          # sensor_msgs/NavSatFix
+      gnss_rtk: ""                             # optional RTK receiver
+      odom: /odom                              # nav_msgs/Odometry (wheel odometry)
+      odom_alt: ""                             # optional LiDAR/visual odometry
+      imu: /imu/data                           # sensor_msgs/Imu
+      camera: /camera/image_raw/compressed     # CompressedImage (ending in 'compressed') or Image
+      detections: /forestcare/detections       # vision_msgs/Detection2DArray, if a perception node runs
+      marks: /forestcare/mark                  # std_msgs/String from the mark node / console
+      lidar: /scan
+    lidar_type: scan                           # 'scan' (LaserScan) or 'points' (PointCloud2)
+
+    camera:
+      name: front camera
+      time_offset_s: 0.0               # FIELD: image stamp latency correction
+      forward_offset_m: 3.0            # FIELD: antenna -> plants in view
+      yaw_offset_deg: 0.0              # FIELD: camera direction vs driving direction (+ = left)
+      placement_sigma_m: 2.0           # FIELD
+      keep_every_s: 0.0
+
+    gnss:
+      name: GNSS receiver
+      max_fix_gap_s: 2.0
+      assumed_sigma_m: 5.0
+      accuracy_scale: 1.0              # multiplies the receiver's reported sigma before localization
+      min_status: 0
+
+    localization:
+      method: gnss                     # gnss | gnss_imu | gnss_odom | gnss_odom_imu | gnss_altodom | rtk | rtk_odom
+      sigma_scale: 1.0                 # FIELD: from the localization test (fc_gateway loc-eval -> recommended_gateway.yaml)
+
+    detections:
+      target_class: prunus_serotina
+      min_target_score: 0.35
+      model_name: ""
+      model_version: ""

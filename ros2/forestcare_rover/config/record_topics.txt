@@ -1,0 +1,37 @@
+# Topics recorded by record_mission.sh: the raw record of a mission. Topics that do not exist on
+# a rover are simply absent from the bag. One topic per line; '#' starts a comment.
+
+# positioning
+/gnss/fix
+/gnss/fix_velocity
+/gnss/time_reference
+/gnss_rtk/fix
+/rtcm
+/odom
+/odom_lidar
+/imu/data
+/imu/mag
+/tf
+/tf_static
+
+# camera (compressed JPEG: about 10x smaller than raw images)
+/camera/image_raw/compressed
+/camera/camera_info
+
+# LiDAR (2D scan or 3D point cloud)
+/scan
+/points
+
+# operator and mission
+/cmd_vel
+/joy
+/forestcare/mark
+/forestcare/detections
+/forestcare_gateway/status
+
+# health and debugging
+/diagnostics
+/rosout
+
+# simulator only (never present on a real rover)
+/sim/ground_truth
